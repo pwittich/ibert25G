@@ -1,0 +1,13 @@
+/build/
+/.Xil/
+/*.jou
+/*.log
+/*.str
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.xpr
+
