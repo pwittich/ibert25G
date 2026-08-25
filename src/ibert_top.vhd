@@ -51,6 +51,15 @@ entity ibert_top is
 end entity ibert_top;
 
 architecture rtl of ibert_top is
+  function reverse_bits(value : std_logic_vector) return std_logic_vector is
+    variable result : std_logic_vector(value'range);
+  begin
+    for index in value'range loop
+      result(index) := value(value'left + value'right - index);
+    end loop;
+    return result;
+  end function;
+
   signal left_refclk_p  : std_logic_vector(5 downto 0);
   signal left_refclk_n  : std_logic_vector(5 downto 0);
   signal right_refclk_p : std_logic_vector(5 downto 0);
@@ -72,8 +81,9 @@ begin
   right_refclk_p <= p_rt_r0_i & p_rt_r0_g & p_rt_r0_e & p_rt_r0_b & p_rt_r0_p & p_rt_r0_n;
   right_refclk_n <= n_rt_r0_i & n_rt_r0_g & n_rt_r0_e & n_rt_r0_b & n_rt_r0_p & n_rt_r0_n;
 
-  left_rx_p <= p_ff4_recv & p_ff6_recv & p_ff3_recv & p_ff2_recv & p_ff5_recv & p_ff1_recv;
-  left_rx_n <= n_ff4_recv & n_ff6_recv & n_ff3_recv & n_ff2_recv & n_ff5_recv & n_ff1_recv;
+  -- FireFly 3 is numbered opposite the GTY site order (130/3 down to 128/0).
+  left_rx_p <= p_ff4_recv & p_ff6_recv & reverse_bits(p_ff3_recv) & p_ff2_recv & p_ff5_recv & p_ff1_recv;
+  left_rx_n <= n_ff4_recv & n_ff6_recv & reverse_bits(n_ff3_recv) & n_ff2_recv & n_ff5_recv & n_ff1_recv;
 
   p_ff1_xmit <= left_tx_p(11 downto 0);
   n_ff1_xmit <= left_tx_n(11 downto 0);
@@ -81,8 +91,8 @@ begin
   n_ff5_xmit <= left_tx_n(15 downto 12);
   p_ff2_xmit <= left_tx_p(27 downto 16);
   n_ff2_xmit <= left_tx_n(27 downto 16);
-  p_ff3_xmit <= left_tx_p(39 downto 28);
-  n_ff3_xmit <= left_tx_n(39 downto 28);
+  p_ff3_xmit <= reverse_bits(left_tx_p(39 downto 28));
+  n_ff3_xmit <= reverse_bits(left_tx_n(39 downto 28));
   p_ff6_xmit <= left_tx_p(43 downto 40);
   n_ff6_xmit <= left_tx_n(43 downto 40);
   p_ff4_xmit <= left_tx_p(55 downto 44);

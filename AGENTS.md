@@ -17,6 +17,17 @@ generated `build/` products.
   outside the map; Vivado rejects repeated slice associations of one formal.
 - Keep the four SysMon I2C addresses and generic I2C address visibly labeled
   in `src/top.sv`.
+- Preserve the deployed I2C addresses: generic register slave `0x2B`; SysMon
+  SLR0=`0x36`, SLR1=`0x34`, SLR2=`0x47`, and SLR3=`0x45`.
+- Preserve the MCU register ABI documented in `README.md`: `r00` and `r01` are
+  scratch registers, `r02`-`r38` are the 37 direct-kHz clock readings in the
+  documented order, and `r39` is the `0x434D` status word. Do not apply x2
+  scaling to GT monitor values.
+- Generate `clk_100` and `clk_325` from the 200-MHz board clock with the
+  1300-MHz-VCO MMCM configuration, and keep both in the monitor map.
+- The current bitstream flow is uncompressed. If this changes, set
+  `BITSTREAM.GENERAL.COMPRESS` reproducibly in Tcl or XDC and update the README
+  and build-state memory.
 - Treat XCI and generated IBERT wrappers as Vivado-owned structure. Make the
   smallest necessary wrapper edits and document them.
 
@@ -31,3 +42,6 @@ vivado -mode batch -source scripts/build_bitstream.tcl
 
 Before programming hardware, review IP status, synthesis/implementation
 warnings, DRCs, GT placement, timing, and all configured clock frequencies.
+Confirm the implemented clock report contains 100.000 MHz and 325.000 MHz,
+the route-status report has no routing errors, and all bus-skew constraints
+are met.

@@ -1,5 +1,5 @@
 module i2c_register_slave #(
-  parameter logic [6:0] I2C_ADDRESS = 7'h42
+  parameter logic [6:0] I2C_ADDRESS = 7'h2b
 ) (
   input  wire clk,
   inout  wire scl,

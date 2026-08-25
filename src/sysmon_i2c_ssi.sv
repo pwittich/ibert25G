@@ -1,10 +1,9 @@
 module sysmon_i2c_ssi #(
-  // Seven-bit I2C addresses. Change these four constants if required.
-  // For SYSMONE4 I2C (not PMBus), address bit 2 must remain zero.
-  parameter logic [6:0] SLR0_I2C_ADDR = 7'h30,
-  parameter logic [6:0] SLR1_I2C_ADDR = 7'h31, // VU13P master SLR
-  parameter logic [6:0] SLR2_I2C_ADDR = 7'h32,
-  parameter logic [6:0] SLR3_I2C_ADDR = 7'h33
+  // Seven-bit PMBus addresses. Address bit 2 selects PMBus in SYSMONE4.
+  parameter logic [6:0] SLR0_I2C_ADDR = 7'h36,
+  parameter logic [6:0] SLR1_I2C_ADDR = 7'h34, // VU13P master SLR
+  parameter logic [6:0] SLR2_I2C_ADDR = 7'h47,
+  parameter logic [6:0] SLR3_I2C_ADDR = 7'h45
 ) (
   input  logic dclk,
   inout  wire  i2c_scl,
@@ -27,11 +26,13 @@ module sysmon_i2c_ssi #(
   localparam logic [15:0] INIT43_SLR1 = 16'h8080 | ({9'b0, SLR1_I2C_ADDR} << 8);
   localparam logic [15:0] INIT43_SLR2 = 16'h8080 | ({9'b0, SLR2_I2C_ADDR} << 8);
   localparam logic [15:0] INIT43_SLR3 = 16'h8080 | ({9'b0, SLR3_I2C_ADDR} << 8);
+  // Divide the 200-MHz DCLK by 40 for a 5-MHz ADCCLK.
+  localparam logic [15:0] INIT42_ADC_DIV40 = 16'h2800;
 
   initial begin
-    if (SLR0_I2C_ADDR[2] || SLR1_I2C_ADDR[2] ||
-        SLR2_I2C_ADDR[2] || SLR3_I2C_ADDR[2])
-      $error("SYSMONE4 I2C address bit 2 must be zero; one address selects PMBus");
+    if (!SLR0_I2C_ADDR[2] || !SLR1_I2C_ADDR[2] ||
+        !SLR2_I2C_ADDR[2] || !SLR3_I2C_ADDR[2])
+      $error("SYSMONE4 PMBus address bit 2 must be set");
     if ((SLR0_I2C_ADDR == SLR1_I2C_ADDR) || (SLR0_I2C_ADDR == SLR2_I2C_ADDR) ||
         (SLR0_I2C_ADDR == SLR3_I2C_ADDR) || (SLR1_I2C_ADDR == SLR2_I2C_ADDR) ||
         (SLR1_I2C_ADDR == SLR3_I2C_ADDR) || (SLR2_I2C_ADDR == SLR3_I2C_ADDR))
@@ -39,7 +40,10 @@ module sysmon_i2c_ssi #(
   end
 
   `define SYSMON_INSTANCE(NAME, INIT43, IDX) \
-    SYSMONE4 #(.INIT_43(INIT43), .SIM_DEVICE("ULTRASCALE_PLUS")) NAME ( \
+    SYSMONE4 #( \
+      .INIT_42(INIT42_ADC_DIV40), .INIT_43(INIT43), \
+      .SIM_DEVICE("ULTRASCALE_PLUS") \
+    ) NAME ( \
       .I2C_SCLK(i2c_scl_in), .I2C_SDA(i2c_sda_in), \
       .I2C_SCLK_TS(scl_ts[IDX]), .I2C_SDA_TS(sda_ts[IDX]), \
       .DCLK(dclk), .DADDR(8'h00), .DEN(1'b0), .DI(16'h0000), .DWE(1'b0), \

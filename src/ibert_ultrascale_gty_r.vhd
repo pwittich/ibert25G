@@ -494,7 +494,9 @@ begin
   --
   -- IBERT core instantiation
   --
-  u_ibert_gty_core_1 : entity work.ibert_ultrascale_gty_core_r
+  -- Keep the vendor-expected instance label so quad_pblock.tcl can be scoped
+  -- to this wrapper during implementation.
+  u_ibert_gty_core : entity work.ibert_ultrascale_gty_core_r
     port map (
       txn_o => gty_txn_o,
       txp_o => gty_txp_o,
