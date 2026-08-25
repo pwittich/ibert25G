@@ -1,10 +1,12 @@
 set script_dir [file dirname [file normalize [info script]]]
 source [file join $script_dir create_project.tcl]
-generate_target all [get_ips]
 export_ip_user_files -of_objects [get_ips] -no_script -sync -force -quiet
 launch_runs synth_1 -jobs 8
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} { error "Synthesis failed" }
+open_run synth_1
+source [file join $script_dir validate_synthesized_design.tcl]
+close_design
 launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
 if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} { error "Implementation failed" }

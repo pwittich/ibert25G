@@ -16,7 +16,10 @@ add_files [list \
   [file join $repo_dir src sysmon_i2c_ssi.sv] \
   [file join $repo_dir src top.sv]]
 
-add_files -norecurse [list \
+add_files -fileset utils_1 -norecurse \
+  [file join $script_dir apply_ibert_floorplan.tcl]
+
+import_ip -files [list \
   [file join $repo_dir ip ibert_left ibert_ultrascale_gty_core_l.xci] \
   [file join $repo_dir ip ibert_right ibert_ultrascale_gty_core_r.xci]]
 
@@ -34,9 +37,12 @@ update_compile_order -fileset sources_1
 foreach ip [get_ips] {
   set locked [get_property IS_LOCKED $ip]
   if {$locked} {
-    puts "WARNING: $ip is locked. Run report_ip_status and upgrade_ip if Vivado requests it."
+    error "$ip is locked. Run report_ip_status and resolve it before building."
   }
 }
 
+generate_target all [get_ips]
+source [file join $script_dir configure_ibert_floorplan.tcl]
+
 puts "Created [get_property DIRECTORY [current_project]]"
-puts "Next: generate_target all [get_ips]; launch_runs impl_1 -to_step write_bitstream"
+puts "Next: launch_runs synth_1; launch_runs impl_1 -to_step write_bitstream"
