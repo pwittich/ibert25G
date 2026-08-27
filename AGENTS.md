@@ -25,9 +25,10 @@ generated `build/` products.
   scaling to GT monitor values.
 - Generate `clk_100` and `clk_325` from the 200-MHz board clock with the
   1300-MHz-VCO MMCM configuration, and keep both in the monitor map.
-- The current bitstream flow is uncompressed. If this changes, set
-  `BITSTREAM.GENERAL.COMPRESS` reproducibly in Tcl or XDC and update the README
-  and build-state memory.
+- All new bitstreams must be compressed. Set
+  `BITSTREAM.GENERAL.COMPRESS=TRUE` reproducibly in each target's Tcl or XDC,
+  enforce it in bitstream-producing scripts, and keep the README and
+  build-state memory current.
 - Treat XCI and generated IBERT wrappers as Vivado-owned structure. Make the
   smallest necessary wrapper edits and document them.
 

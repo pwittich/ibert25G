@@ -19,9 +19,11 @@ This creates `build/vu13p_ibert_25g.xpr`. To generate the bitstream directly:
 vivado -mode batch -source scripts/build_bitstream.tcl
 ```
 
-The current flow does not set `BITSTREAM.GENERAL.COMPRESS`; `top.bit` is
-therefore uncompressed. If compression is enabled later, set it reproducibly
-in Tcl or XDC and update this documentation.
+All bitstream targets default to compressed output. The golden `top.bit` sets
+`BITSTREAM.GENERAL.COMPRESS` in `constraints/board_pins.xdc`; the separate
+Milestone 2 target sets the same property in its target-specific XDC, and
+Milestone 3 inherits the board constraint. Every bitstream build script rejects
+output if compression is not enabled.
 
 The generated IBERT `quad_pblock.tcl` files contain paths relative to each
 generated-core wrapper. `scripts/apply_ibert_floorplan.tcl` is installed as a
@@ -74,6 +76,28 @@ PMBus behavior in `SYSMONE4`.
 | `ip/` | Vivado IBERT XCI configurations |
 | `constraints/` | Board pins, IP timing, SysMon placement, and CDC constraints |
 | `scripts/` | Reproducible project creation and bitstream build |
+
+## HDL-first parallel-test migration shell
+
+An opt-in Milestone 2 hardware target provides the first HDL-first migration
+stage without changing the golden IBERT project or `src/top.sv`. It includes a
+Tcl-generated MicroBlaze supervisor, embedded interrupt-driven firmware, an
+AXI4-Lite job controller, 112 concurrent synthetic lane engines, explicit CDC
+handshakes, atomic double-buffered result BRAM, one completion interrupt, and
+the reserved `0xA0`-`0xFF` I2C mailbox at the existing generic-slave address
+`0x2B`. Both FPGA RGB LED triplets show a pre-firmware blue heartbeat, solid
+blue while busy, healthy-idle green, or idle fault red; green depends on an
+AXI write made by the embedded C supervisor. See
+[docs/gt-test-engine.md](docs/gt-test-engine.md) for the separate build
+commands, register map, result format, validation evidence, and LED pinout.
+
+Milestone 3 is a second opt-in target. It removes only FireFly 5 / physical
+quad 124 from the left IBERT core, manages those four lanes through a native
+GT Wizard and HDL quad/lane controllers, and leaves the other 108 lanes under
+IBERT. It adds atomic XPM result handshakes, native PRBS/loopback/error
+injection, fatal quad-fault completion, and a 1-ms hardware timebase for long
+soaks. The build and first-board-test commands are in the same document; keep
+the compressed golden IBERT image available as the recovery image.
 
 ## Generic I2C clock monitor
 

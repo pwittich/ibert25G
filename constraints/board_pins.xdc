@@ -1,4 +1,5 @@
 # Derived from Apollo CM rev3 top_pins.xdc; only IBERT ports retained.
+set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]
 set_property BITSTREAM.CONFIG.UNUSEDPIN PULLNONE [current_design]
 set_property BITSTREAM.CONFIG.OVERTEMPSHUTDOWN ENABLE [current_design]
 set_property PACKAGE_PIN	AY39 [get_ports	p_lf_r0_ad]
