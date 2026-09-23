@@ -5,7 +5,22 @@
 // quad-124 lanes, and 56 right-IBERT lanes.  ISOLATED_SMOKE removes both IBERT
 // cores while retaining the board clock/I2C ABI for the Milestone 2.5 image.
 module gt_test_milestone3_top #(
-  parameter bit ISOLATED_SMOKE = 1'b0
+  parameter bit ENABLE_TX_SESSION = 1'b0,
+  parameter integer DIAGNOSTIC_TRACE = 0,
+  parameter bit ISOLATED_SMOKE = 1'b0,
+  parameter logic [31:0] HARDWARE_VERSION = 32'h0002_000c,
+  parameter bit STAGED_RX_ACQUISITION = 1'b1,
+  parameter bit REQUIRE_ERROR_FREE_QUALIFICATION = 1'b0,
+  parameter bit USE_EXACT_ERROR_COUNTS = 1'b1,
+  parameter bit DIAGNOSTIC_RX_CLOCK_MONITOR = 1'b0,
+  parameter bit EXTERNAL_RX_RECOVERY = 1'b0,
+  parameter bit EXTERNAL_QUAD_RECOVERY = 1'b0,
+  parameter bit EXTERNAL_STARTUP_QUAD_RESTART = 1'b0,
+  parameter bit POST_CAPTURE_RX_REQUAL = 1'b0,
+  parameter bit POST_CAPTURE_QUAD_RESTART = 1'b0,
+  parameter bit RUNTIME_INTEGRITY_DETECTOR = 1'b0,
+  parameter bit INTEGRITY_HEARTBEAT_TEST_HOOK = 1'b0,
+  parameter bit FIREFLY1_FUNCTIONAL = 1'b0
 ) (
   input wire p_clk_200, n_clk_200,
   inout wire i2c_scl_f_sysmon, i2c_sda_f_sysmon,
@@ -52,7 +67,8 @@ module gt_test_milestone3_top #(
   output wire [3:0] p_m_xmit, n_m_xmit, p_n_xmit, n_n_xmit,
   output wire [3:0] p_o_xmit, n_o_xmit, p_p_xmit, n_p_xmit
 );
-  localparam logic [111:0] MANAGED_MASK =
+  localparam logic [111:0] MANAGED_MASK = FIREFLY1_FUNCTIONAL ?
+    112'h0000000000000000000000000fff :
     // Global lanes 12-15 are the only lanes that software may select.  Keeping
     // this mask at the top makes physical ownership and the register ABI agree.
     112'h000000000000000000000000f000;
@@ -78,20 +94,30 @@ module gt_test_milestone3_top #(
 
   wire engine_interrupt, status_firmware_alive, status_engine_busy;
   wire engine_status_fault;
-  wire quad_ready, quad_fault, lane_rx_reset, managed_rx_clk;
+  wire quad_ready, quad_fault, managed_rx_clk;
+  wire [11:0] managed_lane_rx_reset, managed_rx_clk_vector;
   wire [7:0] quad_fault_reason;
   wire [15:0] quad_diagnostic;
+  wire [223:0] platform_diagnostics;
+  wire [255:0] recovery_diagnostics;
+  wire [255:0] diagnostic_record;
+  wire [7:0] diagnostic_selector;
+  wire [1:0] diagnostic_bank;
+  wire [31:0] engine_protocol_debug;
   wire test_controller_idle, acquisition_ready, result_capture_done;
   wire [2:0] quad_state;
-  wire [3:0] managed_prbs_locked, managed_prbs_error;
-  wire [127:0] managed_exact_error_counts;
-  wire [3:0] managed_exact_error_valid, managed_exact_error_saturated;
+  wire [11:0] managed_prbs_locked, managed_cdr_locked, managed_prbs_error;
+  wire [383:0] managed_exact_error_counts;
+  wire [11:0] managed_exact_error_valid, managed_exact_error_saturated;
 
-  wire [111:0] rx_clocks, rx_resets, rx_prbs_locked;
+  wire [111:0] rx_clocks, rx_resets, rx_prbs_locked, rx_cdr_locked;
   wire [112*16-1:0] rx_prbs_errors;
   wire [112*3-1:0] tx_prbs_select, rx_prbs_select;
   wire [111:0] prbs_counter_reset, lane_running;
-  wire measurement_enable, controls_enable, result_capture_request;
+  wire measurement_enable, measurement_run_toggle;
+  wire controls_enable, acquisition_active;
+  wire tx_session_active;
+  wire result_capture_request;
   wire [112*32-1:0] exact_error_counts;
   wire [111:0] exact_error_valid, exact_error_saturated;
   wire [2:0] loopback_mode;
@@ -149,7 +175,9 @@ module gt_test_milestone3_top #(
     if (ISOLATED_SMOKE) begin : g_isolated_smoke
       // Milestone 2.5 keeps only refclock buffers needed by the unchanged
       // 37-clock monitor map.  All non-managed transmit outputs are tied off.
-      isolated_refclk_buffers u_refclk_buffers (
+      isolated_refclk_buffers #(
+        .USE_EXTERNAL_LEFT0_ODIV2(FIREFLY1_FUNCTIONAL)
+      ) u_refclk_buffers (
         .left_refclk_p({p_lf_r0_y, p_lf_r0_w, p_lf_r0_u, p_lf_r0_r,
                         1'b0, p_lf_r0_ad}),
         .left_refclk_n({n_lf_r0_y, n_lf_r0_w, n_lf_r0_u, n_lf_r0_r,
@@ -159,14 +187,18 @@ module gt_test_milestone3_top #(
         .right_refclk_n({n_rt_r0_i, n_rt_r0_g, n_rt_r0_e, n_rt_r0_b,
                          n_rt_r0_p, n_rt_r0_n}),
         .managed_refclk_odiv2(managed_refclk_odiv2),
+        .external_left0_odiv2(managed_refclk_odiv2),
         .left_refclk_odiv2(left_refclk_odiv2),
         .right_refclk_odiv2(right_refclk_odiv2)
       );
       assign left_ibert_sysclk = 1'b0;
       assign right_ibert_sysclk = 1'b0;
-      assign {p_ff1_xmit, n_ff1_xmit, p_ff2_xmit, n_ff2_xmit,
-              p_ff3_xmit, n_ff3_xmit, p_ff4_xmit, n_ff4_xmit,
+      assign {p_ff2_xmit, n_ff2_xmit, p_ff3_xmit, n_ff3_xmit,
+              p_ff4_xmit, n_ff4_xmit,
               p_ff6_xmit, n_ff6_xmit} = '0;
+      if (!FIREFLY1_FUNCTIONAL) begin
+        assign {p_ff1_xmit, n_ff1_xmit} = '0;
+      end
       assign {p_a_xmit, n_a_xmit, p_b_xmit, n_b_xmit,
               p_c_xmit, n_c_xmit, p_d_xmit, n_d_xmit,
               p_e_xmit, n_e_xmit, p_f_xmit, n_f_xmit,
@@ -180,7 +212,19 @@ module gt_test_milestone3_top #(
     end
   endgenerate
 
-  managed_quad124_wrapper u_managed_quad124 (
+  generate if (!FIREFLY1_FUNCTIONAL) begin : g_quad124
+  managed_quad124_wrapper #(
+    .DIAGNOSTIC_TRACE(DIAGNOSTIC_TRACE),
+    .STAGED_RX_ACQUISITION(STAGED_RX_ACQUISITION),
+    .REQUIRE_ERROR_FREE_QUALIFICATION(REQUIRE_ERROR_FREE_QUALIFICATION),
+    .EXTERNAL_RX_RECOVERY(EXTERNAL_RX_RECOVERY),
+    .EXTERNAL_QUAD_RECOVERY(EXTERNAL_QUAD_RECOVERY),
+    .EXTERNAL_STARTUP_QUAD_RESTART(EXTERNAL_STARTUP_QUAD_RESTART),
+    .POST_CAPTURE_RX_REQUAL(POST_CAPTURE_RX_REQUAL),
+    .POST_CAPTURE_QUAD_RESTART(POST_CAPTURE_QUAD_RESTART),
+    .RUNTIME_INTEGRITY_DETECTOR(RUNTIME_INTEGRITY_DETECTOR),
+    .INTEGRITY_HEARTBEAT_TEST_HOOK(INTEGRITY_HEARTBEAT_TEST_HOOK)
+  ) u_managed_quad124 (
     // Physical lane order is global 12,13,14,15 == GTYE4_CHANNEL_X0Y16-19.
     .mgmt_clk(clk_200), .resetn(resetn),
     .refclk_p(p_lf_r0_af), .refclk_n(n_lf_r0_af),
@@ -191,41 +235,78 @@ module gt_test_milestone3_top #(
     .prbs_counter_reset(prbs_counter_reset[12 +: 4]),
     .lane_running(lane_running[12 +: 4]),
     .loopback_mode(loopback_mode),
+    .acquisition_active(acquisition_active),
     .result_capture_request(result_capture_request),
     .tx_error_inject_toggle(tx_error_inject_toggle[12 +: 4]),
-    .rx_usrclk2(managed_rx_clk), .rx_prbs_locked(managed_prbs_locked),
-    .rx_prbs_error(managed_prbs_error), .lane_rx_reset(lane_rx_reset),
+    .rx_usrclk2(managed_rx_clk), .rx_prbs_locked(managed_prbs_locked[3:0]),
+    .rx_cdr_locked(managed_cdr_locked[3:0]),
+    .rx_prbs_error(managed_prbs_error[3:0]), .lane_rx_reset(managed_lane_rx_reset[0]),
     .refclk_odiv2(managed_refclk_odiv2), .quad_ready(quad_ready),
     .quad_fault(quad_fault), .quad_fault_reason(quad_fault_reason),
     .quad_diagnostic(quad_diagnostic),
+    .platform_diagnostics(platform_diagnostics),
+    .recovery_diagnostics(recovery_diagnostics),
+    .measurement_enable(measurement_enable),
+    .measurement_run_toggle(measurement_run_toggle),
+    .engine_protocol_debug(engine_protocol_debug),
+    .diagnostic_selector(diagnostic_selector), .diagnostic_record(diagnostic_record),
+    .diagnostic_bank(diagnostic_bank),
     .quad_state(quad_state),
     .test_controller_idle(test_controller_idle),
     .acquisition_ready(acquisition_ready),
     .result_capture_done(result_capture_done),
-    .exact_error_counts(managed_exact_error_counts),
-    .exact_error_valid(managed_exact_error_valid),
-    .exact_error_saturated(managed_exact_error_saturated)
+    .exact_error_counts(managed_exact_error_counts[127:0]),
+    .exact_error_valid(managed_exact_error_valid[3:0]),
+    .exact_error_saturated(managed_exact_error_saturated[3:0])
   );
+  assign managed_rx_clk_vector = {12{managed_rx_clk}};
+  end else begin : g_firefly1
+  managed_firefly1_group_wrapper #(
+    .ENABLE_TX_SESSION(ENABLE_TX_SESSION),
+    .STAGED_RX_ACQUISITION(STAGED_RX_ACQUISITION),
+    .REQUIRE_ERROR_FREE_QUALIFICATION(REQUIRE_ERROR_FREE_QUALIFICATION)
+  ) u_managed_firefly1 (
+    .tx_session_active(tx_session_active),
+    .mgmt_clk(clk_200), .resetn(resetn), .refclk_p(p_lf_r0_ad), .refclk_n(n_lf_r0_ad),
+    .rx_p(p_ff1_recv), .rx_n(n_ff1_recv), .tx_p(p_ff1_xmit), .tx_n(n_ff1_xmit),
+    .tx_prbs_select(tx_prbs_select[0 +: 36]), .rx_prbs_select(rx_prbs_select[0 +: 36]),
+    .prbs_counter_reset(prbs_counter_reset[0 +: 12]), .lane_running(lane_running[0 +: 12]),
+    .loopback_mode(loopback_mode), .acquisition_active(acquisition_active), .measurement_enable(measurement_enable),
+    .result_capture_request(result_capture_request), .tx_error_inject_toggle(tx_error_inject_toggle[0 +: 12]),
+    .rx_usrclk2(managed_rx_clk_vector), .rx_prbs_locked(managed_prbs_locked), .rx_cdr_locked(managed_cdr_locked),
+    .rx_prbs_error(managed_prbs_error), .lane_rx_reset(managed_lane_rx_reset), .refclk_odiv2(managed_refclk_odiv2),
+    .platform_ready(quad_ready), .platform_fault(quad_fault), .platform_fault_reason(quad_fault_reason),
+    .platform_idle(test_controller_idle), .acquisition_ready(acquisition_ready), .result_capture_done(result_capture_done),
+    .exact_error_counts(managed_exact_error_counts), .exact_error_valid(managed_exact_error_valid), .exact_error_saturated(managed_exact_error_saturated),
+    .platform_diagnostics(platform_diagnostics));
+  assign quad_diagnostic = 16'd0; assign recovery_diagnostics = 256'd0; assign quad_state = 3'd0;
+  end endgenerate
 
   for (genvar lane = 0; lane < 112; lane++) begin : g_lane_inputs
-    if (lane >= 12 && lane < 16) begin
+    if ((FIREFLY1_FUNCTIONAL && lane < 12) || (!FIREFLY1_FUNCTIONAL && lane >= 12 && lane < 16)) begin
       // Only managed lanes use asynchronous RXUSRCLK2 snapshots and native
       // DRP error counts.  The other lane engines exist for ABI width but are
       // unselectable and cannot drive the IBERT-owned GTs.
-      assign rx_clocks[lane] = managed_rx_clk;
-      assign rx_resets[lane] = lane_rx_reset;
-      assign rx_prbs_locked[lane] = managed_prbs_locked[lane-12];
+      assign rx_clocks[lane] = FIREFLY1_FUNCTIONAL ? managed_rx_clk_vector[lane] : managed_rx_clk;
+      assign rx_resets[lane] = FIREFLY1_FUNCTIONAL ? managed_lane_rx_reset[lane] : managed_lane_rx_reset[0];
+      assign rx_prbs_locked[lane] = managed_prbs_locked[FIREFLY1_FUNCTIONAL ? lane : lane-12];
+      assign rx_cdr_locked[lane] = managed_cdr_locked[FIREFLY1_FUNCTIONAL ? lane : lane-12];
       assign rx_prbs_errors[lane*16 +: 16] =
-        {15'd0, managed_prbs_error[lane-12]};
+        {15'd0, managed_prbs_error[FIREFLY1_FUNCTIONAL ? lane : lane-12]};
       assign exact_error_counts[lane*32 +: 32] =
-        managed_exact_error_counts[(lane-12)*32 +: 32];
-      assign exact_error_valid[lane] = managed_exact_error_valid[lane-12];
-      assign exact_error_saturated[lane] =
-        managed_exact_error_saturated[lane-12];
+        managed_exact_error_counts[(FIREFLY1_FUNCTIONAL ? lane : lane-12)*32 +: 32];
+      // Normal images publish the exact native DRP error count.  The isolated
+      // 2.5.4 diagnostic instead publishes gt_lane_engine's count of cycles
+      // with RXPRBSERR asserted so outage error density can be measured.
+      assign exact_error_valid[lane] = USE_EXACT_ERROR_COUNTS &&
+        managed_exact_error_valid[FIREFLY1_FUNCTIONAL ? lane : lane-12];
+      assign exact_error_saturated[lane] = USE_EXACT_ERROR_COUNTS &&
+        managed_exact_error_saturated[FIREFLY1_FUNCTIONAL ? lane : lane-12];
     end else begin
       assign rx_clocks[lane] = clk_200;
       assign rx_resets[lane] = !resetn;
       assign rx_prbs_locked[lane] = 1'b0;
+      assign rx_cdr_locked[lane] = 1'b0;
       assign rx_prbs_errors[lane*16 +: 16] = 16'd0;
       assign exact_error_counts[lane*32 +: 32] = 32'd0;
       assign exact_error_valid[lane] = 1'b0;
@@ -250,7 +331,8 @@ module gt_test_milestone3_top #(
   );
 
   axi_lite_gt_test_engine #(
-    .LANES(112), .HARDWARE_VERSION(32'h0002_0004),
+    .ENABLE_TX_SESSION(ENABLE_TX_SESSION),
+    .LANES(112), .HARDWARE_VERSION(HARDWARE_VERSION),
     .MANAGED_LANE_MASK(MANAGED_MASK),
     .ASYNC_SNAPSHOT_MASK(MANAGED_MASK)
   ) u_engine (
@@ -270,6 +352,11 @@ module gt_test_milestone3_top #(
     .platform_fault(quad_fault),
     .platform_status({quad_diagnostic, quad_fault_reason,
                       quad_fault, quad_ready, 3'd0, quad_state}),
+    .platform_diagnostics(platform_diagnostics),
+    .recovery_diagnostics(recovery_diagnostics),
+    .engine_protocol_debug(engine_protocol_debug),
+    .diagnostic_selector(diagnostic_selector), .diagnostic_record(diagnostic_record),
+    .diagnostic_bank(diagnostic_bank),
     .acquisition_ready(acquisition_ready),
     .result_capture_done(result_capture_done),
     .exact_error_counts(exact_error_counts),
@@ -281,12 +368,17 @@ module gt_test_milestone3_top #(
     .mailbox_i2c_read_data(mailbox_read_data),
     .mailbox_i2c_read_data_next(mailbox_read_data_next),
     .rx_clk(rx_clocks), .rx_reset(rx_resets),
-    .rx_prbs_locked(rx_prbs_locked), .rx_prbs_errors(rx_prbs_errors),
+    .rx_prbs_locked(rx_prbs_locked), .rx_cdr_locked(rx_cdr_locked),
+    .rx_prbs_errors(rx_prbs_errors),
     .tx_prbs_select(tx_prbs_select), .rx_prbs_select(rx_prbs_select),
     .prbs_counter_reset(prbs_counter_reset), .lane_running(lane_running),
     .loopback_mode(loopback_mode),
     .measurement_enable(measurement_enable),
+    .measurement_run_toggle(measurement_run_toggle),
     .controls_enable(controls_enable),
+    .tx_session_active(tx_session_active),
+    .tx_session_ready(tx_session_active),
+    .acquisition_active(acquisition_active),
     .result_capture_request(result_capture_request),
     .tx_error_inject_toggle(tx_error_inject_toggle)
   );
@@ -356,7 +448,10 @@ module gt_test_milestone3_top #(
   assign monitored_clocks[33] = extra_gty_odiv2[6];
   assign monitored_clocks[34] = extra_gty_odiv2[5];
   assign monitored_clocks[35] = extra_gty_odiv2[4];
-  assign monitored_clocks[36] = extra_gty_odiv2[1];
+  // Only the isolated 2.5.4 diagnostic substitutes managed RXUSRCLK2 for
+  // legacy r38/lf_r1_ab.  Normal and historical images retain the ABI map.
+  assign monitored_clocks[36] = DIAGNOSTIC_RX_CLOCK_MONITOR
+    ? managed_rx_clk : extra_gty_odiv2[1];
 
   clock_frequency_monitor #(
     .N_CLOCKS(37), .REF_HZ(200_000_000), .SCALE_X2('0)

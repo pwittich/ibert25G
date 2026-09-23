@@ -1,7 +1,14 @@
 set script_dir [file dirname [file normalize [info script]]]
 set repo_dir [file dirname $script_dir]
 
-source [file join $script_dir create_milestone3_project.tcl]
+if {![info exists milestone3_create_script]} {
+  set milestone3_create_script [file join $script_dir create_milestone3_project.tcl]
+}
+if {![info exists milestone3_report_dir]} {
+  set milestone3_report_dir [file join $repo_dir build gt_test_milestone3_reports]
+}
+if {![info exists milestone3_version_label]} { set milestone3_version_label v12 }
+source $milestone3_create_script
 export_ip_user_files -of_objects [get_ips] -no_script -sync -force -quiet
 launch_runs synth_1 -jobs 8
 wait_on_run synth_1
@@ -9,10 +16,13 @@ if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
   error "Milestone-3 synthesis failed"
 }
 
-set report_dir [file join $repo_dir build gt_test_milestone3_reports]
+set report_dir $milestone3_report_dir
 file mkdir $report_dir
 report_ip_status -file [file join $report_dir ip_status.rpt]
 open_run synth_1
+if {[info exists milestone3_synth_check]} {
+  source $milestone3_synth_check
+}
 set managed_channels [get_cells -hier -filter {
   REF_NAME == GTYE4_CHANNEL && NAME =~ *u_managed_quad124/*
 }]
@@ -63,6 +73,10 @@ if {[regexp {Timing constraints are not met} $timing_text]} {
 set bitstream [file join [get_property DIRECTORY [get_runs impl_1]] \
   gt_test_milestone3_top.bit]
 if {![file exists $bitstream]} { error "Bitstream was not generated: $bitstream" }
+set versioned_bitstream [file join [get_property DIRECTORY [get_runs impl_1]] \
+  gt_test_milestone3_${milestone3_version_label}.bit]
+file copy -force $bitstream $versioned_bitstream
 puts "Milestone-3 timing constraints met"
 puts "Milestone-3 bitstream: $bitstream"
+puts "Milestone-3 $milestone3_version_label bitstream: $versioned_bitstream"
 puts "Milestone-3 reports: $report_dir"

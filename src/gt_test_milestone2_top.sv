@@ -126,9 +126,11 @@ module gt_test_milestone2_top (
     .status_fault(status_fault),
     .platform_ready(1'b1), .platform_fault(1'b0),
     .platform_status(32'd0),
+    .platform_diagnostics(224'd0),
     .i2c_scl(i2c_scl_internal),
     .i2c_sda(i2c_sda_f_generic),
     .synthetic_lock({112{1'b1}}),
+    .synthetic_cdr_lock({112{1'b1}}),
     .synthetic_errors({112*16{1'b0}})
   );
 

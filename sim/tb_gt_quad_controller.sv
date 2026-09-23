@@ -11,6 +11,7 @@ module tb_gt_quad_controller;
   wire reset_all, ready, fault;
   wire [7:0] fault_reason;
   wire [2:0] state;
+  wire [31:0] diagnostic_live;
 
   always #2.5 clk = ~clk;
 
@@ -23,8 +24,10 @@ module tb_gt_quad_controller;
     .rx_userclk_active_async(rx_active),
     .txresetdone_async(txdone), .rxresetdone_async(rxdone),
     .runtime_rx_reset_active(runtime_reset),
+    .runtime_quad_restart_request(1'b0),
     .gtwiz_reset_all(reset_all), .quad_ready(ready),
-    .quad_fault(fault), .fault_reason(fault_reason), .state(state)
+    .quad_fault(fault), .fault_reason(fault_reason), .state(state),
+    .diagnostic_live(diagnostic_live)
   );
 
   initial begin

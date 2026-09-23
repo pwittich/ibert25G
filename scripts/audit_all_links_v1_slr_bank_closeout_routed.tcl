@@ -1,0 +1,5 @@
+set script_dir [file dirname [file normalize [info script]]]
+set repo_dir [file dirname $script_dir]
+set ::all_links_audit_candidate [file join $repo_dir build gt_test_all_links_v1_slr_bank_closeout_retry1 gt_test_all_links_v1_routed.dcp]
+set ::all_links_audit_report_dir [file join $repo_dir build gt_test_all_links_v1_slr_bank_closeout_retry1 independent_audit]
+source [file join $script_dir audit_all_links_v1_routed.tcl]

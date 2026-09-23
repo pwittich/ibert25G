@@ -4,6 +4,7 @@
 // synthetic and native-GT targets share the same AXI/I2C control plane.
 module gt_test_engine_shell #(
   parameter int unsigned LANES = 112,
+  parameter bit LOCALIZE_DESCRIPTOR_CONTROLS = 1'b0,
   parameter logic [31:0] HARDWARE_VERSION = 32'h0001_0002,
   parameter logic [LANES-1:0] MANAGED_LANE_MASK = {LANES{1'b1}},
   parameter logic [LANES-1:0] ASYNC_SNAPSHOT_MASK = MANAGED_LANE_MASK
@@ -34,12 +35,14 @@ module gt_test_engine_shell #(
   input  wire                  platform_ready,
   input  wire                  platform_fault,
   input  wire [31:0]           platform_status,
+  input  wire [223:0]          platform_diagnostics,
   inout  wire                  i2c_scl,
   inout  wire                  i2c_sda,
 
   input  wire [LANES-1:0]      rx_clk,
   input  wire [LANES-1:0]      rx_reset,
   input  wire [LANES-1:0]      rx_prbs_locked,
+  input  wire [LANES-1:0]      rx_cdr_locked,
   input  wire [LANES*16-1:0]   rx_prbs_errors,
   output wire [LANES*3-1:0]    tx_prbs_select,
   output wire [LANES*3-1:0]    rx_prbs_select,
@@ -51,14 +54,18 @@ module gt_test_engine_shell #(
   wire [7:0] mailbox_address, mailbox_write_data;
   wire [7:0] mailbox_read_data, mailbox_read_data_next;
   wire mailbox_write;
-  wire unused_measurement_enable, unused_controls_enable;
+  wire unused_measurement_enable, unused_measurement_run_toggle;
+  wire unused_controls_enable;
+  wire unused_acquisition_active;
   wire unused_result_capture_request;
+  wire [LANES-1:0] unused_accepted_lane_mask;
 
   // This reusable shell is the synthetic/Milestone-2 binding.  It has no
   // quad-local DRP capture stage, so acquisition/capture handshakes are tied
   // ready and the generic lane snapshots provide the result counts.
   axi_lite_gt_test_engine #(
     .LANES(LANES),
+    .LOCALIZE_DESCRIPTOR_CONTROLS(LOCALIZE_DESCRIPTOR_CONTROLS),
     .HARDWARE_VERSION(HARDWARE_VERSION),
     .MANAGED_LANE_MASK(MANAGED_LANE_MASK),
     .ASYNC_SNAPSHOT_MASK(ASYNC_SNAPSHOT_MASK)
@@ -89,6 +96,10 @@ module gt_test_engine_shell #(
     .platform_ready(platform_ready),
     .platform_fault(platform_fault),
     .platform_status(platform_status),
+    .platform_diagnostics(platform_diagnostics),
+    .recovery_diagnostics(256'd0),
+    .diagnostic_record(256'd0), .diagnostic_selector(), .engine_protocol_debug(),
+    .diagnostic_bank(),
     .acquisition_ready(1'b1),
     .result_capture_done(1'b1),
     .exact_error_counts({LANES*32{1'b0}}),
@@ -102,6 +113,7 @@ module gt_test_engine_shell #(
     .rx_clk(rx_clk),
     .rx_reset(rx_reset),
     .rx_prbs_locked(rx_prbs_locked),
+    .rx_cdr_locked(rx_cdr_locked),
     .rx_prbs_errors(rx_prbs_errors),
     .tx_prbs_select(tx_prbs_select),
     .rx_prbs_select(rx_prbs_select),
@@ -109,8 +121,12 @@ module gt_test_engine_shell #(
     .lane_running(lane_running),
     .loopback_mode(loopback_mode),
     .measurement_enable(unused_measurement_enable),
+    .measurement_run_toggle(unused_measurement_run_toggle),
     .controls_enable(unused_controls_enable),
+    .tx_session_ready(1'b1),
+    .acquisition_active(unused_acquisition_active),
     .result_capture_request(unused_result_capture_request),
+    .accepted_lane_mask(unused_accepted_lane_mask),
     .tx_error_inject_toggle(tx_error_inject_toggle)
   );
 

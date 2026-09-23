@@ -9,9 +9,14 @@
 // Result records are double-buffered so readers always see one complete run,
 // never a mixture of records from the old and new runs.
 module gt_test_engine_core #(
+  parameter bit ENABLE_TX_SESSION = 1'b0,
+  parameter int unsigned SESSION_CYCLES_PER_MS = 200000,
   parameter int unsigned LANES = 112,
   parameter int unsigned USER_BITS_PER_CYCLE = 80,
+  parameter bit LOCALIZE_DESCRIPTOR_CONTROLS = 1'b0,
   parameter logic [31:0] HARDWARE_VERSION = 32'h0001_0002,
+  parameter bit ALL_LINKS_V2_TIMING_HARDENING =
+    (HARDWARE_VERSION == 32'h0002_0501),
   parameter logic [LANES-1:0] MANAGED_LANE_MASK = {LANES{1'b1}},
   parameter logic [LANES-1:0] ASYNC_SNAPSHOT_MASK = MANAGED_LANE_MASK
 ) (
@@ -31,6 +36,12 @@ module gt_test_engine_core #(
   input  wire                    platform_ready,
   input  wire                    platform_fault,
   input  wire [31:0]             platform_status,
+  input  wire [223:0]            platform_diagnostics,
+  input  wire [255:0]            recovery_diagnostics,
+  input  wire [255:0]            diagnostic_record,
+  output wire [7:0]              diagnostic_selector,
+  output logic [1:0]             diagnostic_bank = 0,
+  output wire [31:0]             engine_protocol_debug,
   input  wire                    acquisition_ready,
   input  wire                    result_capture_done,
   input  wire [LANES*32-1:0]     exact_error_counts,
@@ -46,6 +57,7 @@ module gt_test_engine_core #(
   input  wire [LANES-1:0]        rx_clk,
   input  wire [LANES-1:0]        rx_reset,
   input  wire [LANES-1:0]        rx_prbs_locked,
+  input  wire [LANES-1:0]        rx_cdr_locked,
   input  wire [LANES*16-1:0]     rx_prbs_errors,
   output wire [LANES*3-1:0]      tx_prbs_select,
   output wire [LANES*3-1:0]      rx_prbs_select,
@@ -53,8 +65,13 @@ module gt_test_engine_core #(
   output wire [LANES-1:0]        lane_running,
   output wire [2:0]              loopback_mode,
   output wire                    measurement_enable,
+  output wire                    measurement_run_toggle,
   output wire                    controls_enable,
+  output logic                   tx_session_active = 0,
+  input  wire                    tx_session_ready,
+  output wire                    acquisition_active,
   output wire                    result_capture_request,
+  output wire [LANES-1:0]        accepted_lane_mask,
   output logic [LANES-1:0]       tx_error_inject_toggle
 );
   localparam logic [31:0] HARDWARE_ID = 32'h4754_5354; // "GTST"
@@ -69,7 +86,53 @@ module gt_test_engine_core #(
     ST_PUBLISH    = 4'd6
   } state_t;
 
-  state_t state = ST_IDLE;
+  // Low state bits are visible through AXI and I2C status registers.
+  (* fsm_encoding = "none" *) state_t state = ST_IDLE;
+  logic [2:0] active_loopback_mode = 0;
+  logic [31:0] session_duration_ms = 0, session_remaining_ms = 0;
+  logic [31:0] session_tick = 0;
+  logic session_expired = 0, session_rejected = 0;
+  wire session_measurement_fault = ENABLE_TX_SESSION && state != ST_IDLE &&
+                                   active_loopback_mode == 0 &&
+                                   (!tx_session_active || !tx_session_ready);
+  wire effective_platform_fault = platform_fault || session_measurement_fault;
+  wire [31:0] session_status = ENABLE_TX_SESSION ?
+    {27'd0, tx_session_ready, 1'b1, session_rejected, session_expired,
+     tx_session_active} : 32'd0;
+  // Session control is independent of RX clocks and local measurement state.
+  // No implicit renewal, and no register can extend an active lease.
+  always_ff @(posedge mgmt_clk) begin
+    if (!mgmt_resetn || !ENABLE_TX_SESSION) begin
+      tx_session_active <= 0;
+      session_duration_ms <= 0; session_remaining_ms <= 0; session_tick <= 0;
+      session_expired <= 0; session_rejected <= 0;
+    end else begin
+      if (tx_session_active) begin
+        if (platform_fault || session_tick == SESSION_CYCLES_PER_MS-1) begin
+          session_tick <= 0;
+          if (platform_fault || session_remaining_ms <= 1) begin
+            tx_session_active <= 0; session_remaining_ms <= 0; session_expired <= 1;
+          end else session_remaining_ms <= session_remaining_ms - 1'b1;
+        end else session_tick <= session_tick + 1'b1;
+      end
+      if (reg_write && reg_write_strobe == 4'hf) begin
+        if (reg_write_address == 12'h10c && !tx_session_active && state == ST_IDLE)
+          session_duration_ms <= reg_write_data;
+        if (reg_write_address == 12'h100) begin
+          session_rejected <= 1;
+          if (reg_write_data == 1 && !tx_session_active && state == ST_IDLE &&
+              platform_ready && !platform_fault && session_duration_ms != 0 &&
+              session_duration_ms <= 86400000) begin
+            tx_session_active <= 1; session_expired <= 0; session_rejected <= 0;
+            session_remaining_ms <= session_duration_ms; session_tick <= 0;
+          end else if (reg_write_data == 2 && state == ST_IDLE) begin
+            tx_session_active <= 0; session_remaining_ms <= 0; session_tick <= 0;
+            session_rejected <= 0;
+          end
+        end
+      end
+    end
+  end
   // Software may edit descriptor_* only while idle.  active_* is the frozen
   // execution copy and cannot be changed by later register/I2C traffic.
   logic [31:0] descriptor_control = 32'h0000_0501; // opcode 0x1, PRBS31
@@ -77,11 +140,45 @@ module gt_test_engine_core #(
   logic [31:0] descriptor_timeout = 32'd0;
   logic [LANES-1:0] descriptor_lane_mask = {LANES{1'b1}};
   logic [7:0] selected_result_lane = 0;
+  logic diagnostic_page_selected = 0;
+  logic recovery_page_selected = 0;
+  logic [255:0] recovery_snapshot = 0;
+  logic trace_page_selected = 0;
+  logic [7:0] trace_selector = 0;
+  assign diagnostic_selector = trace_selector;
 
   logic [LANES-1:0] active_lane_mask = 0;
+  // Frozen at descriptor acceptance and unchanged through publication.  This
+  // management-domain copy lets target-specific platform reducers use the
+  // same execution epoch as every lane descriptor launch.
+  assign accepted_lane_mask = active_lane_mask;
   logic [2:0] active_prbs_mode = 0;
-  logic [2:0] active_loopback_mode = 0;
+  wire [LANES-1:0] descriptor_selected_to_lane;
+  wire [LANES*3-1:0] descriptor_prbs_to_lane;
+
+  // The all-direct image spans four SLRs.  One parallel management-clock
+  // launch stage per managed lane gives each native-domain descriptor CDC a
+  // local, equal-latency source.  The descriptor is handshake-stable until
+  // all lane acknowledgements return, so this intentional cycle is benign.
+  for (genvar descriptor_lane = 0; descriptor_lane < LANES; descriptor_lane++) begin : g_descriptor_launch
+    if (LOCALIZE_DESCRIPTOR_CONTROLS && MANAGED_LANE_MASK[descriptor_lane]) begin : g_local
+      (* DONT_TOUCH = "yes" *) logic selected_launch = 1'b0;
+      (* DONT_TOUCH = "yes" *) logic [2:0] prbs_launch = 3'd0;
+      always_ff @(posedge mgmt_clk) begin
+        selected_launch <= active_lane_mask[descriptor_lane];
+        prbs_launch <= active_prbs_mode;
+      end
+      assign descriptor_selected_to_lane[descriptor_lane] = selected_launch;
+      assign descriptor_prbs_to_lane[descriptor_lane*3 +: 3] = prbs_launch;
+    end else begin : g_direct
+      assign descriptor_selected_to_lane[descriptor_lane] = active_lane_mask[descriptor_lane];
+      assign descriptor_prbs_to_lane[descriptor_lane*3 +: 3] = active_prbs_mode;
+    end
+  end
   logic start_req_toggle = 0, stop_req_toggle = 0;
+  // A dedicated source flop prevents decoded-FSM skew from appearing as a
+  // second measurement window in an RX clock domain.
+  logic measurement_active = 0;
   logic [31:0] elapsed_cycles = 0;
   logic [17:0] millisecond_divider = 0;
   logic [31:0] run_id = 0;
@@ -90,6 +187,13 @@ module gt_test_engine_core #(
   logic platform_failed_run = 0;
   logic published_bank = 0;
   logic [6:0] copy_lane = 0;
+  // The 56-to-1 result mux crosses SLR boundaries.  Hold its selector and
+  // immutable post-capture sources for a settle cycle, register the selected
+  // record, then commit it on a third cycle.  This preserves the published
+  // FSM encoding/ABI while making the wide mux an explicit two-cycle path.
+  logic [2:0] copy_phase = 0;
+  (* dont_touch = "true" *) logic [255:0] copy_record_stage = 0;
+  logic copy_mask_mismatch_stage = 0;
   logic [7:0] selected_count = 0, passed_count = 0, failed_count = 0;
   logic [31:0] aggregate_summary = 0;
   logic [31:0] mailbox_request_sequence = 0;
@@ -111,6 +215,9 @@ module gt_test_engine_core #(
   wire [LANES-1:0] stop_ack_toggle;
   wire [LANES-1:0] snapshot_send;
   wire [LANES-1:0] snapshot_rcv;
+  assign engine_protocol_debug = {12'd0, start_ack_sync[15:12], stop_ack_sync[15:12],
+    state, controls_enable, measurement_enable, acquisition_active,
+    start_req_toggle, stop_req_toggle, 3'd0};
 
   wire [LANES*256-1:0] snapshot_payload_raw;
   wire [LANES*256-1:0] snapshot_payload;
@@ -118,8 +225,14 @@ module gt_test_engine_core #(
   (* ram_style = "block" *) logic [255:0] result_bank_0 [0:LANES-1];
   (* ram_style = "block" *) logic [255:0] result_bank_1 [0:LANES-1];
   logic [255:0] bank_0_read_data, bank_1_read_data;
-  wire [255:0] selected_record = published_bank
+  wire [255:0] selected_lane_record = published_bank
     ? bank_1_read_data : bank_0_read_data;
+  // Selector 0xfe reserves one read-only 256-bit page for persistent platform
+  // diagnostics without consuming the deployed 0xa0-0xff mailbox addresses.
+  wire [255:0] selected_record = diagnostic_page_selected
+    ? {platform_diagnostics, platform_status} :
+      recovery_page_selected ? recovery_snapshot :
+      trace_page_selected ? diagnostic_record : selected_lane_record;
 
   function automatic logic [31:0] apply_strobe(
     input logic [31:0] previous,
@@ -151,9 +264,12 @@ module gt_test_engine_core #(
       6'h2f: mailbox_word = {16'd0, mailbox_lane_mask[111:96]}; // 0xbc
       6'h30: mailbox_word = mailbox_firmware_version;  // 0xc0
       6'h31: mailbox_word = HARDWARE_VERSION;          // 0xc4
-      6'h32: mailbox_word = {15'd0, platform_fault, bad_command, irq_pending,
-                              10'd0, state};            // 0xc8
-      6'h33: mailbox_word = {24'd0, selected_result_lane}; // 0xcc
+      6'h32: mailbox_word = {15'd0, effective_platform_fault, bad_command, irq_pending,
+                              10'd0, state} | (session_status << 17); // 0xc8
+      6'h33: mailbox_word = diagnostic_page_selected
+        ? 32'h0000_00fe : recovery_page_selected ? 32'hfd :
+          trace_page_selected ? {22'd0, diagnostic_bank, trace_selector} :
+          {24'd0, selected_result_lane}; // 0xcc
       6'h34: mailbox_word = selected_record[31:0];      // 0xd0
       6'h35: mailbox_word = selected_record[63:32];
       6'h36: mailbox_word = selected_record[95:64];
@@ -171,55 +287,114 @@ module gt_test_engine_core #(
   endfunction
 
   for (genvar lane = 0; lane < LANES; lane++) begin : g_lane
-    gt_lane_engine #(
-      .LANE_ID(lane),
-      .USER_BITS_PER_CYCLE(USER_BITS_PER_CYCLE)
-    ) u_lane (
-      .start_req_toggle(start_req_toggle),
-      .stop_req_toggle(stop_req_toggle),
-      .descriptor_selected(active_lane_mask[lane]),
-      .descriptor_prbs_mode(active_prbs_mode),
-      .measurement_enable(measurement_enable),
-      .controls_enable(controls_enable),
-      .start_ack_toggle(start_ack_toggle[lane]),
-      .stop_ack_toggle(stop_ack_toggle[lane]),
-      .snapshot_send(snapshot_send[lane]),
-      .snapshot_rcv(snapshot_rcv[lane]),
-      .rx_clk(rx_clk[lane]),
-      .rx_reset(rx_reset[lane]),
-      .rx_prbs_locked(rx_prbs_locked[lane]),
-      .rx_prbs_errors(rx_prbs_errors[lane*16 +: 16]),
-      .tx_prbs_select(tx_prbs_select[lane*3 +: 3]),
-      .rx_prbs_select(rx_prbs_select[lane*3 +: 3]),
-      .prbs_counter_reset(prbs_counter_reset[lane]),
-      .running(lane_running[lane]),
-      .snapshot_id_status(snapshot_payload_raw[lane*256 +: 32]),
-      .snapshot_errors(snapshot_payload_raw[lane*256 + 32 +: 64]),
-      .snapshot_tested_bits(snapshot_payload_raw[lane*256 + 96 +: 64]),
-      .snapshot_lock_losses(snapshot_payload_raw[lane*256 + 160 +: 32]),
-      .snapshot_valid_cycles(snapshot_payload_raw[lane*256 + 192 +: 64])
-    );
-
-    if (ASYNC_SNAPSHOT_MASK[lane]) begin : g_snapshot_cdc
-      // The lane holds src_in and src_send until the internal destination
-      // handshake has atomically captured the complete result record.
-      xpm_cdc_handshake #(
-        .DEST_EXT_HSK(0), .DEST_SYNC_FF(2), .INIT_SYNC_FF(0),
-        .SIM_ASSERT_CHK(1), .SRC_SYNC_FF(2), .WIDTH(256)
-      ) u_snapshot_handshake (
-        .src_clk(rx_clk[lane]),
-        .src_in(snapshot_payload_raw[lane*256 +: 256]),
-        .src_send(snapshot_send[lane]),
-        .src_rcv(snapshot_rcv[lane]),
-        .dest_clk(mgmt_clk),
-        .dest_out(snapshot_payload[lane*256 +: 256]),
-        .dest_req(),
-        .dest_ack(1'b0)
+    if (MANAGED_LANE_MASK[lane]) begin : g_managed
+      // Protocol phase follows the management reset only. GT recovery must
+      // never reset toggles, including unselected or stopped lane engines.
+      (* ASYNC_REG = "TRUE" *) logic [1:0] protocol_reset_sync = 2'b11;
+      always_ff @(posedge rx_clk[lane] or negedge mgmt_resetn) begin
+        if (!mgmt_resetn) protocol_reset_sync <= 2'b11;
+        else protocol_reset_sync <= {protocol_reset_sync[0], 1'b0};
+      end
+      // Elaborate the complete counter and CDC datapath only for lanes owned
+      // by this target. As later milestones expand MANAGED_LANE_MASK, their
+      // full engines appear automatically; an all-ones mask still builds the
+      // original 112-engine architecture.
+      gt_lane_engine #(
+        .LANE_ID(lane),
+        .USER_BITS_PER_CYCLE(USER_BITS_PER_CYCLE)
+      ) u_lane (
+        .start_req_toggle(start_req_toggle),
+        .stop_req_toggle(stop_req_toggle),
+        .descriptor_selected(descriptor_selected_to_lane[lane]),
+        .descriptor_prbs_mode(descriptor_prbs_to_lane[lane*3 +: 3]),
+        .measurement_enable(measurement_enable),
+        .controls_enable(controls_enable),
+        .start_ack_toggle(start_ack_toggle[lane]),
+        .stop_ack_toggle(stop_ack_toggle[lane]),
+        .snapshot_send(snapshot_send[lane]),
+        .snapshot_rcv(snapshot_rcv[lane]),
+        .rx_clk(rx_clk[lane]),
+        .protocol_reset(protocol_reset_sync[1]),
+        .rx_reset(rx_reset[lane]),
+        .rx_prbs_locked(rx_prbs_locked[lane]),
+        .rx_cdr_locked(rx_cdr_locked[lane]),
+        .rx_prbs_errors(rx_prbs_errors[lane*16 +: 16]),
+        .tx_prbs_select(tx_prbs_select[lane*3 +: 3]),
+        .rx_prbs_select(rx_prbs_select[lane*3 +: 3]),
+        .prbs_counter_reset(prbs_counter_reset[lane]),
+        .running(lane_running[lane]),
+        .snapshot_id_status(snapshot_payload_raw[lane*256 +: 32]),
+        .snapshot_errors(snapshot_payload_raw[lane*256 + 32 +: 64]),
+        .snapshot_tested_bits(snapshot_payload_raw[lane*256 + 96 +: 64]),
+        .snapshot_lock_losses(snapshot_payload_raw[lane*256 + 160 +: 32]),
+        .snapshot_valid_cycles(snapshot_payload_raw[lane*256 + 192 +: 64])
       );
-    end else begin : g_snapshot_same_clock
+
+      if (ASYNC_SNAPSHOT_MASK[lane]) begin : g_snapshot_cdc
+        // The lane holds src_in and src_send until the internal destination
+        // handshake has atomically captured the complete result record.
+        if (ALL_LINKS_V2_TIMING_HARDENING) begin : g_split_snapshot
+          // Four equal handshakes reduce each destination capture-enable
+          // fanout from 256 flops to 64.  The source payload is immutable
+          // while snapshot_send is high, and the lane may acknowledge stop
+          // only after all four chunks have returned src_rcv; therefore the
+          // management domain cannot consume a mixed snapshot.
+          wire [3:0] chunk_rcv;
+          assign snapshot_rcv[lane] = &chunk_rcv;
+          for (genvar chunk = 0; chunk < 4; chunk++) begin : g_chunk
+            xpm_cdc_handshake #(
+              .DEST_EXT_HSK(0), .DEST_SYNC_FF(2), .INIT_SYNC_FF(0),
+              .SIM_ASSERT_CHK(1), .SRC_SYNC_FF(2), .WIDTH(64)
+            ) u_snapshot_handshake (
+              .src_clk(rx_clk[lane]),
+              .src_in(snapshot_payload_raw[lane*256+chunk*64 +: 64]),
+              .src_send(snapshot_send[lane]),
+              .src_rcv(chunk_rcv[chunk]),
+              .dest_clk(mgmt_clk),
+              .dest_out(snapshot_payload[lane*256+chunk*64 +: 64]),
+              .dest_req(),
+              .dest_ack(1'b0)
+            );
+          end
+        end else begin : g_single_snapshot
+          xpm_cdc_handshake #(
+            .DEST_EXT_HSK(0), .DEST_SYNC_FF(2), .INIT_SYNC_FF(0),
+            .SIM_ASSERT_CHK(1), .SRC_SYNC_FF(2), .WIDTH(256)
+          ) u_snapshot_handshake (
+            .src_clk(rx_clk[lane]),
+            .src_in(snapshot_payload_raw[lane*256 +: 256]),
+            .src_send(snapshot_send[lane]),
+            .src_rcv(snapshot_rcv[lane]),
+            .dest_clk(mgmt_clk),
+            .dest_out(snapshot_payload[lane*256 +: 256]),
+            .dest_req(),
+            .dest_ack(1'b0)
+          );
+        end
+      end else begin : g_snapshot_same_clock
+        assign snapshot_payload[lane*256 +: 256] =
+          snapshot_payload_raw[lane*256 +: 256];
+        assign snapshot_rcv[lane] = snapshot_send[lane];
+      end
+    end else begin : g_unmanaged
+      // The 112-lane ABI includes lanes still owned by IBERT, but the
+      // descriptor mask makes them permanently unselectable in this build.
+      // A combinational protocol stub preserves collective start/stop
+      // acknowledgement and a deterministic unselected lane-ID record without
+      // implementing unreachable counters or a high-fanout reset tree.
+      localparam logic [31:0] UNMANAGED_STATUS = lane;
+      assign start_ack_toggle[lane] = start_req_toggle;
+      assign stop_ack_toggle[lane] = stop_req_toggle;
+      assign snapshot_send[lane] = 1'b0;
+      assign snapshot_rcv[lane] = 1'b0;
+      assign snapshot_payload_raw[lane*256 +: 256] =
+        {224'd0, UNMANAGED_STATUS};
       assign snapshot_payload[lane*256 +: 256] =
-        snapshot_payload_raw[lane*256 +: 256];
-      assign snapshot_rcv[lane] = snapshot_send[lane];
+        {224'd0, UNMANAGED_STATUS};
+      assign tx_prbs_select[lane*3 +: 3] = 3'd0;
+      assign rx_prbs_select[lane*3 +: 3] = 3'd0;
+      assign prbs_counter_reset[lane] = 1'b0;
+      assign lane_running[lane] = 1'b0;
     end
   end
 
@@ -242,18 +417,60 @@ module gt_test_engine_core #(
     snapshot_payload[copy_lane*256 + 96 +: 160],
     copy_lane_errors, copy_lane_status
   };
+  // Snapshot selection is transferred atomically with the lane result. Do
+  // not silently reduce the requested lane count when a lane captured stale
+  // descriptor data. Reuse the existing failed-platform record/stop reason.
+  wire copy_lane_mask_mismatch =
+    measured_lane_record[11] != active_lane_mask[copy_lane];
   wire [255:0] copy_lane_record =
     // A physical-platform failure can remove the RX clocks needed for normal
     // lane acknowledgements.  In that case publish deterministic failed
     // records from mgmt_clk so the job still completes atomically.
-    (platform_failed_run && active_lane_mask[copy_lane])
+    ((platform_failed_run || copy_lane_mask_mismatch) && active_lane_mask[copy_lane])
       ? platform_failure_record
       : measured_lane_record;
-  wire copy_lane_selected = copy_lane_record[11];
-  wire copy_lane_passed = copy_lane_selected &&
-                          copy_lane_record[12] &&
-                          !copy_lane_record[13] &&
-                          copy_lane_record[32 +: 64] == 0;
+  wire [6:0] copy_lane_within_side = copy_lane >= 56 ? copy_lane - 56 : copy_lane;
+  wire [1:0] copy_lane_bank = copy_lane_within_side < 12 ? 2'd0 :
+                              copy_lane_within_side < 28 ? 2'd1 :
+                              copy_lane_within_side < 44 ? 2'd2 : 2'd3;
+  logic [1:0] copy_bank_stage = 0;
+  wire [1023:0] copy_bank_record;
+  wire [3:0] copy_bank_mismatch;
+  wire copy_bank_load = state == ST_COPY && copy_phase == 0;
+  wire copy_bank_capture = state == ST_COPY && copy_phase == 2;
+  if (ALL_LINKS_V2_TIMING_HARDENING) begin : g_banked_result_copy
+`define RESULT_COPY_BANK(NAME, P_FIRST, P_COUNT, P_INDEX) \
+    (* KEEP_HIERARCHY = "yes" *) \
+    all_links_v2_result_copy_bank #(.FIRST(P_FIRST), .COUNT(P_COUNT)) NAME ( \
+      .clk(mgmt_clk), .load_selector(copy_bank_load), \
+      .capture_record(copy_bank_capture), .global_lane(copy_lane), \
+      .platform_failed(platform_failed_run), \
+      .left_active(active_lane_mask[P_FIRST +: P_COUNT]), \
+      .right_active(active_lane_mask[56+P_FIRST +: P_COUNT]), \
+      .left_exact_valid(exact_error_valid[P_FIRST +: P_COUNT]), \
+      .right_exact_valid(exact_error_valid[56+P_FIRST +: P_COUNT]), \
+      .left_exact_saturated(exact_error_saturated[P_FIRST +: P_COUNT]), \
+      .right_exact_saturated(exact_error_saturated[56+P_FIRST +: P_COUNT]), \
+      .left_exact_counts(exact_error_counts[P_FIRST*32 +: P_COUNT*32]), \
+      .right_exact_counts(exact_error_counts[(56+P_FIRST)*32 +: P_COUNT*32]), \
+      .left_snapshot(snapshot_payload[P_FIRST*256 +: P_COUNT*256]), \
+      .right_snapshot(snapshot_payload[(56+P_FIRST)*256 +: P_COUNT*256]), \
+      .record_stage(copy_bank_record[P_INDEX*256 +: 256]), \
+      .mismatch_stage(copy_bank_mismatch[P_INDEX]));
+    `RESULT_COPY_BANK(u_result_copy_slr0, 0, 12, 0)
+    `RESULT_COPY_BANK(u_result_copy_slr1, 12, 16, 1)
+    `RESULT_COPY_BANK(u_result_copy_slr2, 28, 16, 2)
+    `RESULT_COPY_BANK(u_result_copy_slr3, 44, 12, 3)
+`undef RESULT_COPY_BANK
+  end else begin : g_legacy_result_copy
+    assign copy_bank_record = '0;
+    assign copy_bank_mismatch = '0;
+  end
+  wire copy_stage_selected = copy_record_stage[11];
+  wire copy_stage_passed = copy_stage_selected &&
+                           copy_record_stage[12] &&
+                           !copy_record_stage[13] &&
+                           copy_record_stage[32 +: 64] == 0;
 
   always_comb begin
     // The native AXI register map includes debug controls and direct descriptor
@@ -264,8 +481,11 @@ module gt_test_engine_core #(
       12'h004: reg_read_data = HARDWARE_VERSION;
       12'h008: reg_read_data = {LANES[7:0], 8'd28, 8'd12, 8'h3f};
       12'h00c: reg_read_data = 32'd0;
-      12'h010: reg_read_data = {15'd0, platform_fault, bad_command,
-                                irq_pending, 10'd0, state};
+      12'h010: reg_read_data = {15'd0, effective_platform_fault, bad_command,
+                                irq_pending, 10'd0, state} | (session_status << 17);
+      12'h104: reg_read_data = session_status;
+      12'h108: reg_read_data = session_remaining_ms;
+      12'h10c: reg_read_data = session_duration_ms;
       12'h014: reg_read_data = {30'd0, bad_command, irq_pending};
       12'h018: reg_read_data = run_id;
       12'h01c: reg_read_data = aggregate_summary;
@@ -276,7 +496,9 @@ module gt_test_engine_core #(
       12'h030: reg_read_data = descriptor_lane_mask[63:32];
       12'h034: reg_read_data = descriptor_lane_mask[95:64];
       12'h038: reg_read_data = {16'd0, descriptor_lane_mask[111:96]};
-      12'h03c: reg_read_data = {24'd0, selected_result_lane};
+      12'h03c: reg_read_data = diagnostic_page_selected
+        ? 32'h0000_00fe : recovery_page_selected ? 32'hfd :
+          trace_page_selected ? {22'd0, diagnostic_bank, trace_selector} : {24'd0, selected_result_lane};
       12'h040: reg_read_data = selected_record[31:0];
       12'h044: reg_read_data = selected_record[63:32];
       12'h048: reg_read_data = selected_record[95:64];
@@ -294,6 +516,13 @@ module gt_test_engine_core #(
       12'h078: reg_read_data = MANAGED_LANE_MASK[63:32];
       12'h07c: reg_read_data = MANAGED_LANE_MASK[95:64];
       12'h080: reg_read_data = {16'd0, MANAGED_LANE_MASK[111:96]};
+      12'h084: reg_read_data = platform_diagnostics[31:0];
+      12'h088: reg_read_data = platform_diagnostics[63:32];
+      12'h08c: reg_read_data = platform_diagnostics[95:64];
+      12'h090: reg_read_data = platform_diagnostics[127:96];
+      12'h094: reg_read_data = platform_diagnostics[159:128];
+      12'h098: reg_read_data = platform_diagnostics[191:160];
+      12'h09c: reg_read_data = platform_diagnostics[223:192];
       12'h0a0: reg_read_data = mailbox_request_sequence;
       12'h0a4: reg_read_data = mailbox_command;
       12'h0a8: reg_read_data = mailbox_duration;
@@ -306,7 +535,9 @@ module gt_test_engine_core #(
       12'h0c4: reg_read_data = HARDWARE_VERSION;
       12'h0c8: reg_read_data = {15'd0, platform_fault, bad_command, irq_pending,
                                 10'd0, state};
-      12'h0cc: reg_read_data = {24'd0, selected_result_lane};
+      12'h0cc: reg_read_data = diagnostic_page_selected
+        ? 32'h0000_00fe : recovery_page_selected ? 32'hfd :
+          trace_page_selected ? {22'd0, diagnostic_bank, trace_selector} : {24'd0, selected_result_lane};
       12'h0d0: reg_read_data = selected_record[31:0];
       12'h0d4: reg_read_data = selected_record[63:32];
       12'h0d8: reg_read_data = selected_record[95:64];
@@ -332,8 +563,13 @@ module gt_test_engine_core #(
 
   assign interrupt = irq_pending;
   assign loopback_mode = active_loopback_mode;
-  assign measurement_enable = state == ST_RUN;
+  assign measurement_enable = measurement_active;
+  // The start toggle changes exactly once for each accepted descriptor.  RX
+  // diagnostics use it as a run epoch so only one completion can be published
+  // for that descriptor, even if measurement_enable is disturbed later.
+  assign measurement_run_toggle = start_req_toggle;
   assign controls_enable = state != ST_IDLE;
+  assign acquisition_active = state == ST_ARM_WAIT;
   assign result_capture_request = state == ST_CAPTURE_WAIT;
   // These coarse status outputs are intended for board-level indicators.
   // Firmware-alive cannot assert until MicroBlaze has executed its AXI write
@@ -342,7 +578,7 @@ module gt_test_engine_core #(
   assign status_firmware_alive = mailbox_firmware_version != 0;
   assign status_engine_busy = state != ST_IDLE;
   assign status_fault = bad_command ||
-                        platform_fault ||
+                        effective_platform_fault || session_expired ||
                         (mailbox_response_sequence != 0 &&
                          mailbox_response_code == 32'd1) ||
                         (run_id != 0 &&
@@ -361,11 +597,18 @@ module gt_test_engine_core #(
       descriptor_timeout <= 0;
       descriptor_lane_mask <= MANAGED_LANE_MASK;
       selected_result_lane <= 0;
+      diagnostic_page_selected <= 0;
+      recovery_page_selected <= 0;
+      recovery_snapshot <= 0;
+      trace_page_selected <= 0;
+      trace_selector <= 0;
+      diagnostic_bank <= 0;
       active_lane_mask <= 0;
       active_prbs_mode <= 0;
       active_loopback_mode <= 0;
       start_req_toggle <= 0;
       stop_req_toggle <= 0;
+      measurement_active <= 0;
       elapsed_cycles <= 0;
       millisecond_divider <= 0;
       run_id <= 0;
@@ -375,6 +618,9 @@ module gt_test_engine_core #(
       platform_failed_run <= 0;
       published_bank <= 0;
       copy_lane <= 0;
+      copy_phase <= 0;
+      copy_record_stage <= 0;
+      copy_mask_mismatch_stage <= 0;
       selected_count <= 0;
       passed_count <= 0;
       failed_count <= 0;
@@ -393,6 +639,23 @@ module gt_test_engine_core #(
       stop_ack_sync <= 0;
       tx_error_inject_toggle <= 0;
     end else begin
+      // Additional diagnostic pages never overlap the 112 ordinary lanes.
+      if ((reg_write && (reg_write_address == 12'h03c || reg_write_address == 12'h0cc)) ||
+          (mailbox_i2c_write && mailbox_i2c_address == 8'hcc)) begin : select_trace
+        logic [7:0] s;
+        s = mailbox_i2c_write && mailbox_i2c_address == 8'hcc ?
+            mailbox_i2c_write_data : reg_write_data[7:0];
+        if ((s >= 8'h80 && s <= 8'hbf) || (s >= 8'hf8 && s <= 8'hfc)) begin
+          trace_selector <= s; trace_page_selected <= 1;
+          diagnostic_bank <= mailbox_i2c_write ? 0 : reg_write_data[9:8];
+          diagnostic_page_selected <= 0; recovery_page_selected <= 0;
+        end else if (s < LANES || s == 8'hfd || s == 8'hfe)
+          trace_page_selected <= 0;
+      end
+      // MCU multibyte writes arrive CC then CD. Existing one-byte selector
+      // writes reset the bank to zero; CD supplies the optional trace bank.
+      if (mailbox_i2c_write && mailbox_i2c_address == 8'hcd && trace_page_selected)
+        diagnostic_bank <= mailbox_i2c_write_data[1:0];
       start_ack_meta <= start_ack_toggle;
       start_ack_sync <= start_ack_meta;
       stop_ack_meta <= stop_ack_toggle;
@@ -413,13 +676,19 @@ module gt_test_engine_core #(
                 state != ST_PUBLISH) begin
               stop_reason <= 8'd2;
               stop_req_toggle <= ~stop_req_toggle;
+              measurement_active <= 0;
               state <= ST_STOP_WAIT;
             end
             if (reg_write_data[0]) begin
               // Validate the complete descriptor at the doorbell.  In
               // particular, hardware rejects every lane outside the target's
               // MANAGED_LANE_MASK even if software writes such a mask.
-              if (state == ST_IDLE && platform_ready &&
+              if (state == ST_IDLE && platform_ready && !platform_fault &&
+                  (!ENABLE_TX_SESSION ||
+                   (descriptor_control[13:11] == 0 && tx_session_active &&
+                    tx_session_ready &&
+                    descriptor_control[10:8] == 5) ||
+                   (descriptor_control[13:11] == 2 && !tx_session_active)) &&
                   descriptor_control[7:0] == 8'h1 &&
                   descriptor_control[10:8] != 0 &&
                   descriptor_control[10:8] <= 5 &&
@@ -472,8 +741,19 @@ module gt_test_engine_core #(
             if (reg_write_strobe[1])
               descriptor_lane_mask[111:104] <= reg_write_data[15:8];
           end
-          12'h03c: if (reg_write_data[7:0] < LANES)
+          12'h03c: if (reg_write_data[7:0] == 8'hfd) begin
+            recovery_page_selected <= 1;
+            diagnostic_page_selected <= 0;
+            recovery_snapshot <= recovery_diagnostics;
+          end else if (reg_write_data[7:0] == 8'hfe) begin
+            diagnostic_page_selected <= 1;
+            recovery_page_selected <= 0;
+          end
+          else if (reg_write_data[7:0] < LANES) begin
             selected_result_lane <= reg_write_data[7:0];
+            diagnostic_page_selected <= 0;
+            recovery_page_selected <= 0;
+          end
           12'h060: tx_error_inject_toggle[31:0] <=
             tx_error_inject_toggle[31:0] ^
             (reg_write_data & MANAGED_LANE_MASK[31:0]);
@@ -488,8 +768,19 @@ module gt_test_engine_core #(
             (reg_write_data[15:0] & MANAGED_LANE_MASK[111:96]);
           12'h0c0: mailbox_firmware_version <= apply_strobe(
             mailbox_firmware_version, reg_write_data, reg_write_strobe);
-          12'h0cc: if (reg_write_data[7:0] < LANES)
+          12'h0cc: if (reg_write_data[7:0] == 8'hfd) begin
+            recovery_page_selected <= 1;
+            diagnostic_page_selected <= 0;
+            recovery_snapshot <= recovery_diagnostics;
+          end else if (reg_write_data[7:0] == 8'hfe) begin
+            diagnostic_page_selected <= 1;
+            recovery_page_selected <= 0;
+          end
+          else if (reg_write_data[7:0] < LANES) begin
             selected_result_lane <= reg_write_data[7:0];
+            diagnostic_page_selected <= 0;
+            recovery_page_selected <= 0;
+          end
           12'h0f0: mailbox_response_sequence <= apply_strobe(
             mailbox_response_sequence, reg_write_data, reg_write_strobe);
           12'h0f4: mailbox_response_code <= apply_strobe(
@@ -520,9 +811,21 @@ module gt_test_engine_core #(
           6'h2f: if (!mailbox_i2c_address[1])
             mailbox_lane_mask[96 + mailbox_i2c_address[0]*8 +: 8]
               <= mailbox_i2c_write_data;
-          6'h33: if (mailbox_i2c_address[1:0] == 0 &&
-                       mailbox_i2c_write_data < LANES)
-            selected_result_lane <= mailbox_i2c_write_data;
+          6'h33: if (mailbox_i2c_address[1:0] == 0) begin
+            if (mailbox_i2c_write_data == 8'hfd) begin
+              recovery_page_selected <= 1;
+              diagnostic_page_selected <= 0;
+              recovery_snapshot <= recovery_diagnostics;
+            end else if (mailbox_i2c_write_data == 8'hfe) begin
+              diagnostic_page_selected <= 1;
+              recovery_page_selected <= 0;
+            end
+            else if (mailbox_i2c_write_data < LANES) begin
+              selected_result_lane <= mailbox_i2c_write_data;
+              diagnostic_page_selected <= 0;
+              recovery_page_selected <= 0;
+            end
+          end
           default: ;
         endcase
       end
@@ -534,26 +837,30 @@ module gt_test_engine_core #(
           // Every lane, including unselected lanes, acknowledges the start
           // toggle.  Physical acquisition additionally waits for the quad-local
           // reset/lock sequencer to declare its measurement window ready.
-          if (platform_fault) begin
+          if (effective_platform_fault) begin
             // A lost QPLL/user clock cannot be relied upon to return a lane
             // handshake. Publish deterministic failed records entirely in
             // the management domain so the job still terminates atomically.
             stop_reason <= 8'd4;
             platform_failed_run <= 1;
             copy_lane <= 0;
+            copy_phase <= 0;
             state <= ST_COPY;
           end else if (start_ack_sync == {LANES{start_req_toggle}} &&
                        acquisition_ready) begin
             elapsed_cycles <= 0;
+            measurement_active <= 1;
             state <= ST_RUN;
           end
         end
 
         ST_RUN: begin
-          if (platform_fault) begin
+          if (effective_platform_fault) begin
             stop_reason <= 8'd4;
             platform_failed_run <= 1;
             copy_lane <= 0;
+            copy_phase <= 0;
+            measurement_active <= 0;
             state <= ST_COPY;
           end else if (!descriptor_control[16] ||
                        millisecond_divider == 18'd199999) begin
@@ -566,10 +873,12 @@ module gt_test_engine_core #(
                 descriptor_timeout < descriptor_duration) begin
               stop_reason <= 8'd3;
               stop_req_toggle <= ~stop_req_toggle;
+              measurement_active <= 0;
               state <= ST_STOP_WAIT;
             end else if (elapsed_cycles + 1'b1 >= descriptor_duration) begin
               stop_reason <= 8'd1;
               stop_req_toggle <= ~stop_req_toggle;
+              measurement_active <= 0;
               state <= ST_STOP_WAIT;
             end
           end else begin
@@ -580,10 +889,11 @@ module gt_test_engine_core #(
         ST_STOP_WAIT: begin
           // Lane stop acknowledgements are withheld until each 256-bit result
           // snapshot has completed its CDC handshake.
-          if (platform_fault) begin
+          if (effective_platform_fault) begin
             stop_reason <= 8'd4;
             platform_failed_run <= 1;
             copy_lane <= 0;
+            copy_phase <= 0;
             state <= ST_COPY;
           end else if (stop_ack_sync == {LANES{stop_req_toggle}}) begin
             state <= ST_CAPTURE_WAIT;
@@ -591,35 +901,95 @@ module gt_test_engine_core #(
         end
 
         ST_CAPTURE_WAIT: begin
-          if (platform_fault) begin
+          if (effective_platform_fault) begin
             stop_reason <= 8'd4;
             platform_failed_run <= 1;
             copy_lane <= 0;
+            copy_phase <= 0;
             state <= ST_COPY;
           end else if (result_capture_done) begin
             copy_lane <= 0;
+            copy_phase <= 0;
             state <= ST_COPY;
           end
         end
 
         ST_COPY: begin
-          // Write only the hidden bank while accumulating the aggregate.  The
-          // currently published bank remains immutable for AXI/I2C readers.
-          if (published_bank)
-            result_bank_0[copy_lane] <= copy_lane_record;
-          else
-            result_bank_1[copy_lane] <= copy_lane_record;
-          if (copy_lane_selected) begin
-            selected_count <= selected_count + 1'b1;
-            if (copy_lane_passed)
-              passed_count <= passed_count + 1'b1;
-            else
-              failed_count <= failed_count + 1'b1;
+          if (ALL_LINKS_V2_TIMING_HARDENING) begin
+            case (copy_phase)
+              3'd0: begin
+                // Register both the SLR bank and each bank-local selector.
+                copy_bank_stage <= copy_lane_bank;
+                copy_phase <= 3'd1;
+              end
+              3'd1: copy_phase <= 3'd2; // settle local 24/32-to-1 muxes
+              3'd2: copy_phase <= 3'd3; // bank modules capture local records
+              3'd3: copy_phase <= 3'd4; // settle registered SLR-bank outputs
+              3'd4: begin
+                // Only a four-to-one mux reaches the central staging bank.
+                copy_record_stage <= copy_bank_record[copy_bank_stage*256 +: 256];
+                copy_mask_mismatch_stage <= copy_bank_mismatch[copy_bank_stage];
+                copy_phase <= 3'd5;
+              end
+              default: begin
+                if (copy_mask_mismatch_stage)
+                  stop_reason <= 8'd4;
+                if (published_bank)
+                  result_bank_0[copy_lane] <= copy_record_stage;
+                else
+                  result_bank_1[copy_lane] <= copy_record_stage;
+                if (copy_stage_selected) begin
+                  selected_count <= selected_count + 1'b1;
+                  if (copy_stage_passed)
+                    passed_count <= passed_count + 1'b1;
+                  else
+                    failed_count <= failed_count + 1'b1;
+                end
+                if (copy_lane == LANES-1)
+                  state <= ST_PUBLISH;
+                else begin
+                  copy_lane <= copy_lane + 1'b1;
+                  copy_phase <= 3'd0;
+                end
+              end
+            endcase
+          end else begin
+            case (copy_phase)
+              3'd0: begin
+                // Deliberate settle interval for the new copy_lane selector.
+                copy_phase <= 3'd1;
+              end
+              3'd1: begin
+                copy_record_stage <= copy_lane_record;
+                copy_mask_mismatch_stage <=
+                  !platform_failed_run && copy_lane_mask_mismatch;
+                copy_phase <= 3'd2;
+              end
+              default: begin
+              if (copy_mask_mismatch_stage)
+                stop_reason <= 8'd4;
+              // Write only the hidden bank while accumulating the aggregate.
+              // The currently published bank remains immutable for readers.
+              if (published_bank)
+                result_bank_0[copy_lane] <= copy_record_stage;
+              else
+                result_bank_1[copy_lane] <= copy_record_stage;
+              if (copy_stage_selected) begin
+                selected_count <= selected_count + 1'b1;
+                if (copy_stage_passed)
+                  passed_count <= passed_count + 1'b1;
+                else
+                  failed_count <= failed_count + 1'b1;
+              end
+              if (copy_lane == LANES-1)
+                state <= ST_PUBLISH;
+              else begin
+                copy_lane <= copy_lane + 1'b1;
+                copy_phase <= 2'd0;
+              end
+              end
+            endcase
           end
-          if (copy_lane == LANES-1)
-            state <= ST_PUBLISH;
-          else
-            copy_lane <= copy_lane + 1'b1;
         end
 
         ST_PUBLISH: begin
@@ -635,7 +1005,10 @@ module gt_test_engine_core #(
           state <= ST_IDLE;
         end
 
-        default: state <= ST_IDLE;
+        default: begin
+          measurement_active <= 0;
+          state <= ST_IDLE;
+        end
       endcase
     end
   end

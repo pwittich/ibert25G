@@ -16,7 +16,7 @@ mb-gcc "${common_flags[@]}" -c -I"$repo_dir/firmware" \
   -o "$out_dir/gt_test_milestone3_start.o"
 
 mb-gcc "${common_flags[@]}" -c -I"$repo_dir/firmware" \
-  -DGTTE_FIRMWARE_VERSION=0x00020004u \
+  -DGTTE_FIRMWARE_VERSION=0x0002000cu \
   -DGTTE_MANAGED_MASK0=0x0000f000u \
   -DGTTE_MANAGED_MASK1=0x00000000u \
   -DGTTE_MANAGED_MASK2=0x00000000u \

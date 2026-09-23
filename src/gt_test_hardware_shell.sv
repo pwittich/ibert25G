@@ -5,6 +5,7 @@
 // supplied synthetic lock/error vectors, and intentionally drive no GT pins.
 module gt_test_hardware_shell #(
   parameter int unsigned LANES = 112,
+  parameter bit LOCALIZE_DESCRIPTOR_CONTROLS = 1'b0,
   parameter logic [LANES-1:0] MANAGED_LANE_MASK = {LANES{1'b1}},
   parameter logic [LANES-1:0] ASYNC_SNAPSHOT_MASK = {LANES{1'b0}}
 ) (
@@ -34,12 +35,14 @@ module gt_test_hardware_shell #(
   input  wire                  platform_ready,
   input  wire                  platform_fault,
   input  wire [31:0]           platform_status,
+  input  wire [223:0]          platform_diagnostics,
   inout  wire                  i2c_scl,
   inout  wire                  i2c_sda,
 
   // Synthetic lane stimuli are present only in this migration shell.  A
   // managed-GT target replaces them with native GT status/error signals.
   input  wire [LANES-1:0]      synthetic_lock,
+  input  wire [LANES-1:0]      synthetic_cdr_lock,
   input  wire [LANES*16-1:0]   synthetic_errors
 );
   wire [LANES-1:0] rx_clocks = {LANES{clk_200}};
@@ -54,7 +57,8 @@ module gt_test_hardware_shell #(
   wire [2:0] unused_loopback_mode;
   wire [LANES-1:0] unused_tx_error_inject_toggle;
   gt_test_engine_shell #(
-    .LANES(LANES), .MANAGED_LANE_MASK(MANAGED_LANE_MASK),
+    .LANES(LANES), .LOCALIZE_DESCRIPTOR_CONTROLS(LOCALIZE_DESCRIPTOR_CONTROLS),
+    .MANAGED_LANE_MASK(MANAGED_LANE_MASK),
     .ASYNC_SNAPSHOT_MASK(ASYNC_SNAPSHOT_MASK)
   ) u_engine_shell (
     .clk_200(clk_200),
@@ -83,11 +87,13 @@ module gt_test_hardware_shell #(
     .platform_ready(platform_ready),
     .platform_fault(platform_fault),
     .platform_status(platform_status),
+    .platform_diagnostics(platform_diagnostics),
     .i2c_scl(i2c_scl),
     .i2c_sda(i2c_sda),
     .rx_clk(rx_clocks),
     .rx_reset(rx_resets),
     .rx_prbs_locked(synthetic_lock),
+    .rx_cdr_locked(synthetic_cdr_lock),
     .rx_prbs_errors(synthetic_errors),
     .tx_prbs_select(unused_tx_prbs_select),
     .rx_prbs_select(unused_rx_prbs_select),

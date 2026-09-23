@@ -3,7 +3,23 @@
 // Board wrapper for the isolated quad-124 smoke image.  The inactive GT
 // transmit pins are inputs here so the shared board XDC remains reusable,
 // while synthesis removes them rather than creating constant output buffers.
-module gt_test_milestone25_top (
+module gt_test_milestone25_top #(
+  parameter integer DIAGNOSTIC_TRACE = 0,
+  parameter logic [31:0] HARDWARE_VERSION = 32'h0002_000a,
+  parameter bit STAGED_RX_ACQUISITION = 1'b0,
+  parameter bit REQUIRE_ERROR_FREE_QUALIFICATION = 1'b1,
+  parameter bit USE_EXACT_ERROR_COUNTS = 1'b1,
+  parameter bit DIAGNOSTIC_RX_CLOCK_MONITOR = 1'b0,
+  parameter bit EXTERNAL_RX_RECOVERY = 1'b0,
+  parameter bit EXTERNAL_QUAD_RECOVERY = 1'b0,
+  parameter bit EXTERNAL_STARTUP_QUAD_RESTART = 1'b0,
+  parameter bit POST_CAPTURE_RX_REQUAL = 1'b0,
+  parameter bit POST_CAPTURE_QUAD_RESTART = 1'b0,
+  parameter bit RUNTIME_INTEGRITY_DETECTOR = 1'b0,
+  parameter bit INTEGRITY_HEARTBEAT_TEST_HOOK = 1'b0,
+  // Forwarded explicitly: this isolated board wrapper is the synthesis top.
+  parameter bit FIREFLY1_FUNCTIONAL = 1'b0
+) (
   input wire p_clk_200, n_clk_200,
   inout wire i2c_scl_f_sysmon, i2c_sda_f_sysmon,
   inout wire i2c_scl_f_generic, i2c_sda_f_generic,
@@ -50,7 +66,23 @@ module gt_test_milestone25_top (
   input wire [3:0] p_m_xmit, n_m_xmit, p_n_xmit, n_n_xmit,
   input wire [3:0] p_o_xmit, n_o_xmit, p_p_xmit, n_p_xmit
 );
-  gt_test_milestone3_top #(.ISOLATED_SMOKE(1'b1)) u_isolated (
+  gt_test_milestone3_top #(
+    .DIAGNOSTIC_TRACE(DIAGNOSTIC_TRACE),
+    .ISOLATED_SMOKE(1'b1),
+    .HARDWARE_VERSION(HARDWARE_VERSION),
+    .STAGED_RX_ACQUISITION(STAGED_RX_ACQUISITION),
+    .REQUIRE_ERROR_FREE_QUALIFICATION(REQUIRE_ERROR_FREE_QUALIFICATION),
+    .USE_EXACT_ERROR_COUNTS(USE_EXACT_ERROR_COUNTS),
+    .DIAGNOSTIC_RX_CLOCK_MONITOR(DIAGNOSTIC_RX_CLOCK_MONITOR),
+    .EXTERNAL_RX_RECOVERY(EXTERNAL_RX_RECOVERY),
+    .EXTERNAL_QUAD_RECOVERY(EXTERNAL_QUAD_RECOVERY),
+    .EXTERNAL_STARTUP_QUAD_RESTART(EXTERNAL_STARTUP_QUAD_RESTART),
+    .POST_CAPTURE_RX_REQUAL(POST_CAPTURE_RX_REQUAL),
+    .POST_CAPTURE_QUAD_RESTART(POST_CAPTURE_QUAD_RESTART),
+    .RUNTIME_INTEGRITY_DETECTOR(RUNTIME_INTEGRITY_DETECTOR),
+    .INTEGRITY_HEARTBEAT_TEST_HOOK(INTEGRITY_HEARTBEAT_TEST_HOOK),
+    .FIREFLY1_FUNCTIONAL(FIREFLY1_FUNCTIONAL)
+  ) u_isolated (
     .p_clk_200(p_clk_200), .n_clk_200(n_clk_200),
     .i2c_scl_f_sysmon(i2c_scl_f_sysmon),
     .i2c_sda_f_sysmon(i2c_sda_f_sysmon),

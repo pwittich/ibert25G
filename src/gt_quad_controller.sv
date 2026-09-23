@@ -17,11 +17,13 @@ module gt_quad_controller #(
   input  wire [3:0] txresetdone_async,
   input  wire [3:0] rxresetdone_async,
   input  wire       runtime_rx_reset_active,
+  input  wire       runtime_quad_restart_request,
   output logic      gtwiz_reset_all,
   output logic      quad_ready,
   output logic      quad_fault,
   output logic [7:0] fault_reason,
-  output logic [2:0] state
+  (* fsm_encoding = "none" *) output logic [2:0] state,
+  output wire [31:0] diagnostic_live
 );
   localparam logic [2:0] ST_RESET = 3'd0;
   localparam logic [2:0] ST_WAIT_POWER = 3'd1;
@@ -30,6 +32,7 @@ module gt_quad_controller #(
   localparam logic [2:0] ST_READY = 3'd4;
   localparam logic [2:0] ST_FAULT = 3'd5;
   localparam logic [2:0] ST_RX_REQUAL = 3'd6;
+  localparam logic [2:0] ST_RESTART_ASSERT = 3'd7;
 
   // Every GT Wizard status input is asynchronous to mgmt_clk.  Keep each
   // qualifier behind an explicit two-flop synchronizer before it participates
@@ -42,6 +45,8 @@ module gt_quad_controller #(
   (* ASYNC_REG = "TRUE" *) logic [3:0] rxdone_meta = 0, rxdone_sync = 0;
   logic [31:0] counter = 0;
   logic rx_requal_pending = 0;
+  logic [2:0] restart_assert_seen = 0;
+  logic restart_reset_released = 0;
 
   wire all_power_good = &power_sync;
   wire all_reset_done = &txdone_sync && &rxdone_sync &&
@@ -55,6 +60,11 @@ module gt_quad_controller #(
   };
   wire [7:0] non_rx_fault_reason = live_fault_reason & 8'h0f;
   wire [7:0] rx_fault_reason = live_fault_reason & 8'h30;
+  assign diagnostic_live = {
+    2'd0, fault_reason, gtwiz_reset_all, quad_fault, quad_ready, state,
+    runtime_rx_reset_active, rxdone_sync, txdone_sync,
+    rx_active_sync, tx_active_sync, qpll_sync, power_sync
+  };
 
   always_ff @(posedge mgmt_clk) begin
     power_meta <= gtpowergood_async;
@@ -78,6 +88,8 @@ module gt_quad_controller #(
       quad_fault <= 0;
       fault_reason <= 0;
       rx_requal_pending <= 0;
+      restart_assert_seen <= 0;
+      restart_reset_released <= 0;
     end else begin
       case (state)
         // Hold the Wizard's global reset long enough to make configuration and
@@ -141,7 +153,20 @@ module gt_quad_controller #(
         ST_READY: begin
           // Power/QPLL/TX losses are always fatal.  RX qualifiers are allowed
           // to fall only during the PRBS controller's intentional reset flow.
-          if (non_rx_fault_reason != 0) begin
+          if (runtime_quad_restart_request) begin
+            // A bounded PRBS-acquisition recovery deliberately reuses the
+            // complete power-up sequence.  Acknowledge it by dropping ready;
+            // the requester then releases this level before bring-up returns.
+            state <= ST_RESTART_ASSERT;
+            counter <= 0;
+            gtwiz_reset_all <= 1;
+            quad_ready <= 0;
+            quad_fault <= 0;
+            fault_reason <= 0;
+            rx_requal_pending <= 0;
+            restart_assert_seen <= 0;
+            restart_reset_released <= 0;
+          end else if (non_rx_fault_reason != 0) begin
             fault_reason <= non_rx_fault_reason;
             quad_ready <= 0;
             state <= ST_FAULT;
@@ -156,6 +181,44 @@ module gt_quad_controller #(
             fault_reason <= rx_fault_reason;
             quad_ready <= 0;
             state <= ST_FAULT;
+          end
+        end
+
+        ST_RESTART_ASSERT: begin
+          quad_ready <= 0;
+          if (!restart_reset_released) begin
+            // The Wizard starts its internal reset sequence on release of the
+            // level input.  Hold the request for the ordinary reset interval,
+            // then release it before waiting for status to fall.
+            gtwiz_reset_all <= 1;
+            if (counter + 1 >= RESET_HOLD_CYCLES) begin
+              counter <= 0;
+              gtwiz_reset_all <= 0;
+              restart_reset_released <= 1;
+            end else begin
+              counter <= counter + 1'b1;
+            end
+          end else begin
+            // Runtime status can fall well after reset release.  Latch the
+            // QPLL-lock, TX-reset-done, and RX-reset-done effects independently
+            // because their low intervals need not overlap. Requiring the RX
+            // low observation prevents stale-high status from satisfying the
+            // subsequent WAIT_DONE state before the delayed RX drop arrives.
+            gtwiz_reset_all <= 0;
+            restart_assert_seen <= restart_assert_seen |
+              {!(&rxdone_sync), !(&txdone_sync), !qpll_sync};
+            if (&(restart_assert_seen |
+                  {!(&rxdone_sync), !(&txdone_sync), !qpll_sync})) begin
+              counter <= 0;
+              restart_assert_seen <= 0;
+              restart_reset_released <= 0;
+              state <= ST_WAIT_POWER;
+            end else if (counter + 1 >= INIT_TIMEOUT_CYCLES) begin
+              fault_reason <= 8'h40;
+              state <= ST_FAULT;
+            end else begin
+              counter <= counter + 1'b1;
+            end
           end
         end
 

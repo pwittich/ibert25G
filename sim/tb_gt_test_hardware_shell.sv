@@ -29,11 +29,13 @@ module tb_gt_test_hardware_shell;
   logic platform_ready = 1;
   logic platform_fault = 0;
   logic [31:0] platform_status = 0;
+  logic [223:0] platform_diagnostics = 0;
   tri1 i2c_scl, i2c_sda;
   logic i2c_scl_drive_low = 0, i2c_sda_drive_low = 0;
   assign i2c_scl = i2c_scl_drive_low ? 1'b0 : 1'bz;
   assign i2c_sda = i2c_sda_drive_low ? 1'b0 : 1'bz;
   logic [LANES-1:0] synthetic_lock = {LANES{1'b1}};
+  logic [LANES-1:0] synthetic_cdr_lock = {LANES{1'b1}};
   logic [LANES*16-1:0] synthetic_errors = 0;
 
   // Exercise the same four 256-bit XPM snapshot handshakes used by the
@@ -246,9 +248,11 @@ module tb_gt_test_hardware_shell;
     axi_read(12'h040, value);
     if (value != old_lane0_status)
       $fatal(1, "Published result changed during active job");
-    synthetic_lock[3] = 0;
+    // Match the v11 hardware finding: PRBS lock can remain high while the
+    // FireFly and native GT CDR lose lock. V12 must still record the event.
+    synthetic_cdr_lock[3] = 0;
     repeat (5) @(posedge clk);
-    synthetic_lock[3] = 1;
+    synthetic_cdr_lock[3] = 1;
     wait_for_interrupt();
     synthetic_errors[7*16 +: 16] = 0;
     axi_read(12'h01c, value);

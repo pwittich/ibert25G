@@ -9,10 +9,14 @@
 // Command validity is part of the engine ABI: invalid descriptors set the
 // engine's bad-command/interrupt status instead of generating an AXI error.
 module axi_lite_gt_test_engine #(
+  parameter bit ENABLE_TX_SESSION = 1'b0,
   parameter int unsigned LANES = 112,
   parameter int unsigned AXI_ADDRESS_WIDTH = 12,
   parameter int unsigned USER_BITS_PER_CYCLE = 80,
+  parameter bit LOCALIZE_DESCRIPTOR_CONTROLS = 1'b0,
   parameter logic [31:0] HARDWARE_VERSION = 32'h0001_0002,
+  parameter bit ALL_LINKS_V2_TIMING_HARDENING =
+    (HARDWARE_VERSION == 32'h0002_0501),
   parameter logic [LANES-1:0] MANAGED_LANE_MASK = {LANES{1'b1}},
   parameter logic [LANES-1:0] ASYNC_SNAPSHOT_MASK = MANAGED_LANE_MASK
 ) (
@@ -42,6 +46,12 @@ module axi_lite_gt_test_engine #(
   input  wire                         platform_ready,
   input  wire                         platform_fault,
   input  wire [31:0]                  platform_status,
+  input  wire [223:0]                 platform_diagnostics,
+  input  wire [255:0]                 recovery_diagnostics,
+  input  wire [255:0]                 diagnostic_record,
+  output wire [7:0]                   diagnostic_selector,
+  output wire [1:0]                   diagnostic_bank,
+  output wire [31:0]                  engine_protocol_debug,
   input  wire                         acquisition_ready,
   input  wire                         result_capture_done,
   input  wire [LANES*32-1:0]          exact_error_counts,
@@ -57,6 +67,7 @@ module axi_lite_gt_test_engine #(
   input  wire [LANES-1:0]             rx_clk,
   input  wire [LANES-1:0]             rx_reset,
   input  wire [LANES-1:0]             rx_prbs_locked,
+  input  wire [LANES-1:0]             rx_cdr_locked,
   input  wire [LANES*16-1:0]          rx_prbs_errors,
   output wire [LANES*3-1:0]           tx_prbs_select,
   output wire [LANES*3-1:0]           rx_prbs_select,
@@ -64,8 +75,13 @@ module axi_lite_gt_test_engine #(
   output wire [LANES-1:0]             lane_running,
   output wire [2:0]                   loopback_mode,
   output wire                         measurement_enable,
+  output wire                         measurement_run_toggle,
   output wire                         controls_enable,
+  output wire                         tx_session_active,
+  input  wire                         tx_session_ready,
+  output wire                         acquisition_active,
   output wire                         result_capture_request,
+  output wire [LANES-1:0]             accepted_lane_mask,
   output wire [LANES-1:0]             tx_error_inject_toggle
 );
   logic aw_pending = 0, w_pending = 0;
@@ -83,9 +99,12 @@ module axi_lite_gt_test_engine #(
   assign s_axi_arready = !s_axi_rvalid;
 
   gt_test_engine_core #(
+    .ENABLE_TX_SESSION(ENABLE_TX_SESSION),
     .LANES(LANES),
     .USER_BITS_PER_CYCLE(USER_BITS_PER_CYCLE),
+    .LOCALIZE_DESCRIPTOR_CONTROLS(LOCALIZE_DESCRIPTOR_CONTROLS),
     .HARDWARE_VERSION(HARDWARE_VERSION),
+    .ALL_LINKS_V2_TIMING_HARDENING(ALL_LINKS_V2_TIMING_HARDENING),
     .MANAGED_LANE_MASK(MANAGED_LANE_MASK),
     .ASYNC_SNAPSHOT_MASK(ASYNC_SNAPSHOT_MASK)
   ) u_core (
@@ -104,6 +123,11 @@ module axi_lite_gt_test_engine #(
     .platform_ready(platform_ready),
     .platform_fault(platform_fault),
     .platform_status(platform_status),
+    .platform_diagnostics(platform_diagnostics),
+    .recovery_diagnostics(recovery_diagnostics),
+    .diagnostic_record(diagnostic_record), .diagnostic_selector(diagnostic_selector),
+    .diagnostic_bank(diagnostic_bank),
+    .engine_protocol_debug(engine_protocol_debug),
     .acquisition_ready(acquisition_ready),
     .result_capture_done(result_capture_done),
     .exact_error_counts(exact_error_counts),
@@ -117,6 +141,7 @@ module axi_lite_gt_test_engine #(
     .rx_clk(rx_clk),
     .rx_reset(rx_reset),
     .rx_prbs_locked(rx_prbs_locked),
+    .rx_cdr_locked(rx_cdr_locked),
     .rx_prbs_errors(rx_prbs_errors),
     .tx_prbs_select(tx_prbs_select),
     .rx_prbs_select(rx_prbs_select),
@@ -124,8 +149,13 @@ module axi_lite_gt_test_engine #(
     .lane_running(lane_running),
     .loopback_mode(loopback_mode),
     .measurement_enable(measurement_enable),
+    .measurement_run_toggle(measurement_run_toggle),
     .controls_enable(controls_enable),
+    .tx_session_active(tx_session_active),
+    .tx_session_ready(tx_session_ready),
+    .acquisition_active(acquisition_active),
     .result_capture_request(result_capture_request),
+    .accepted_lane_mask(accepted_lane_mask),
     .tx_error_inject_toggle(tx_error_inject_toggle)
   );
 
