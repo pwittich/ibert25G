@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vivado Analyze Timing"
+  short_description: "Analyze timing paths, clocks, and exceptions"
+  default_prompt: "Use $vivado-analyze-timing to diagnose this design timing and produce actionable reports."

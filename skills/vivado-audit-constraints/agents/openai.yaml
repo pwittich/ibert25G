@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vivado Audit Constraints"
+  short_description: "Audit XDC clocks, CDCs, pins, and coverage"
+  default_prompt: "Use $vivado-audit-constraints to review the design constraints and identify unsafe gaps."

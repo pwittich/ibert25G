@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vivado Manage IP"
+  short_description: "Inspect, generate, and upgrade Vivado IP"
+  default_prompt: "Use $vivado-manage-ip to inspect and safely update the Vivado IP in this repository."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vivado Build Project"
+  short_description: "Create and run reproducible Vivado builds"
+  default_prompt: "Use $vivado-build-project to create and validate this Vivado project build."

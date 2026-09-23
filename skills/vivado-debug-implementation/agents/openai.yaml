@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vivado Debug Implementation"
+  short_description: "Debug DRC, placement, routing, and utilization"
+  default_prompt: "Use $vivado-debug-implementation to inspect the implemented design and triage its failures."
