@@ -1,0 +1,65 @@
+Final 24-hour external qualification state:
+  request sequence = 0x00000005
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000000
+ response sequence = 0x00000005
+     response code = 0x00040401
+   hardware run ID = 0x00000004
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+ response sequence = 0x00000005
+     response code = 0x00040401
+  hardware summary = 0x00040401
+      engine state = 0x00000000
+     stable run ID = 0x00000004
+
+Published lane records:
+lane 12: id/status=0x0000180c, errors=0, lock_losses=0, tested_bits=2227461058375760, valid_cycles=27843263229697, BER95<1.347e-15
+lane 13: id/status=0x0000180d, errors=0, lock_losses=0, tested_bits=2227461058375760, valid_cycles=27843263229697, BER95<1.347e-15
+lane 14: id/status=0x0000180e, errors=0, lock_losses=0, tested_bits=2227461058375680, valid_cycles=27843263229696, BER95<1.347e-15
+lane 15: id/status=0x0000180f, errors=0, lock_losses=0, tested_bits=2227461058375680, valid_cycles=27843263229696, BER95<1.347e-15
+
+Platform diagnostics (selector 0xfe):
+        platform = 0xe0000044
+       live_prbs = 0x4ff00f00
+         live_rx = 0xf000000f
+       live_quad = 0x000c7fff
+      fault_prbs = 0x00000000
+        fault_rx = 0x00000000
+      fault_quad = 0x00000000
+   fault_counter = 0x00000000
+
+Live PRBS context:
+  state          = 0 (IDLE)
+  loopback       = 0x0
+  selected lanes = 0xf
+  running lanes  = 0x0
+  locked lanes   = 0x0
+  ever locked    = 0xf
+  lost after lock= 0xf
+  acquisition ready = False
+  runtime RX reset  = False
+  controller idle   = True
+  controller fault  = False
+
+Retained fixed acquisition observation:
+  format marker      = True
+  sampled-error lanes= 0xf
+  sampled-unlock lanes= 0x0
+  maximum clean streak= 0 cycles (0.000 us)
+  live selected error = False
+  live selected locked= False
+  Wizard RX done      = True
+  selected RX done    = True
+  selected PMA done   = True
+
+No first-fault snapshot is valid.
+
+Legacy platform decode:
+  quad state/ready/fault = 4/True/False
+  fault reason = 0x00
+
+24-HOUR EXTERNAL QUALIFICATION PASSED.
+Record the final F1 AVTT current and FPGA temperature with these results.

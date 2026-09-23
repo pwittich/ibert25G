@@ -1,5 +1,32 @@
 # HDL-first GT test engine
 
+Current development status (2026-09-14): full v13 (`0x0002000D`) produced two
+independently programmed fresh external failures before `RUN`, both preserved
+as `0x04000404` platform faults. A routed comparison with isolated v275 found
+the same managed-quad configuration, placement, golden RX properties, and no
+managed-to-full-IBERT net. Full v14 (`0x0002000E`) is therefore the current
+one-variable diagnostic: it disables only v13's planned external-startup
+full-quad restart. Matching firmware, compressed implementation, and
+independent routed audit pass at WNS/WHS `+0.222/+0.009 ns`, with zero routing
+or DRC errors, all bus-skew constraints met, and descriptor/profile/runtime
+structure verified. After a power cycle, F1 was programmed once through XVC
+`TCP:apollo3010-1:2542` and two unique 60-second external sequences/run IDs 1
+and 2 passed (`0x00040401`): each managed lane recorded 1,546,848,197,680 and
+1,546,848,072,800 tested bits, respectively, with zero errors and zero native
+lock losses. This supports the narrow startup-restart hypothesis but is
+diagnostic, not qualification.
+See [the v14 diagnostic record](v14-no-startup-restart-diagnostic.md).
+
+The descriptor-skew hardware record, its source repair, and isolated v270
+evidence remain historical references. Architecture descriptions below are not
+qualification claims; full-M3, isolated diagnostics, and qualification
+candidates remain separate.
+
+Recovery plan items 1–4 are documented in
+[recovery-items1-4.md](recovery-items1-4.md), including the separate lane protocol
+reset, integrated regression matrix, diagnostic artifact archive and selector
+0xFD retained restart records. Existing 0xFE diagnostics keep their layout.
+
 This is the migration shell for the HDL-first parallel GT test architecture.
 It is deliberately separate from the golden `top` target: the existing Vivado
 project and its 112 standalone IBERT lanes are unchanged.
@@ -59,8 +86,11 @@ project and its 112 standalone IBERT lanes are unchanged.
   explicit synchronizers.
 - Near-end PMA loopback follows the required high-rate GT reset sequence:
   assert `GTRXRESET` with `LOOPBACK=000`, select `LOOPBACK=010`, then pulse
-  `RXPMARESET`. Acquisition begins only after all selected receivers report
-  PRBS lock. External-loopback jobs skip these PMA-loopback reset operations.
+  `RXPMARESET`. External-path jobs retain `LOOPBACK=000` and keep the already
+  live RX datapath out of reset. In both modes, a management-domain qualifier
+  suppresses expected transient RX-status faults from the engine ARM interval
+  until all selected receivers report PRBS lock. Acquisition then clears the
+  selected native error counters before starting the timed measurement.
 - At stop, the controller reads each selected channel's exact 32-bit native
   `RX_PRBS_ERR_CNT` through DRP addresses `0x25E` and `0x25F`. This replaces
   the earlier approximation that accumulated cycles in which `RXPRBSERR` was
@@ -112,7 +142,7 @@ All registers are 32-bit little-endian words.
 | Offset | Access | Meaning |
 |---:|---|---|
 | `0x000` | R | Hardware ID, `0x47545354` (`GTST`) |
-| `0x004` | R | Hardware version: M2 `0x00010002`, current M2.5/M3 `0x00020004` |
+| `0x004` | R | Hardware version: M2 `0x00010002`, validated M2.5 `0x00020004`, current full-M3 candidate `0x0002000C` |
 | `0x008` | R | Capabilities: lanes, quads, groups, PRBS mask |
 | `0x00C` | W | Doorbell: bit 0 start, bit 1 abort, bit 2 clear IRQ/fault |
 | `0x010` | R | State, IRQ pending, bad-command, and platform-fault status |
@@ -123,11 +153,16 @@ All registers are 32-bit little-endian words.
 | `0x024` | R/W | Duration in 200-MHz cycles, or milliseconds when control bit 16 is set |
 | `0x028` | R/W | Timeout in the selected timebase; zero disables |
 | `0x02C`-`0x038` | R/W | 112-bit lane mask, low word first |
-| `0x03C` | R/W | Published-result lane selector, 0 through 111 |
+| `0x03C` | R/W | Published-result selector: lane 0 through 111, or diagnostic page `0xFE` |
 | `0x040`-`0x05C` | R | Selected lane's eight-word record |
 | `0x060`-`0x06C` | R/W1T | Per-lane TX PRBS error-injection toggles, low word first; unmanaged bits are ignored |
 | `0x070` | R | Platform status: quad state `[2:0]`, ready bit 6, fault bit 7, latched fault reason `[15:8]` |
 | `0x074`-`0x080` | R | Hardware managed-lane mask, low word first |
+| `0x084` | R | Live PRBS sequencer, selected/running/locked/ever-locked/lost-lock masks and control flags |
+| `0x088` | R | Live RX reset, PMA reset, capture, DRP, and loopback qualifiers |
+| `0x08C` | R | Live quad power, QPLL, user-clock, reset-done, state, ready, and fault qualifiers |
+| `0x090`-`0x098` | R | First-fault snapshots of the preceding three diagnostic words |
+| `0x09C` | R | First-fault-valid bit 31 and captured sequencer-cycle count `[30:0]` |
 
 PRBS modes 1 through 5 select PRBS7, PRBS9, PRBS15, PRBS23, and PRBS31.
 Opcode 1 starts a parallel BER job. Loopback encodings accepted by firmware
@@ -167,8 +202,8 @@ changing their addresses. The mailbox uses the remaining byte addresses:
 | `0xA0`-`0xBC` | MCU | Request sequence, command, duration, timeout, lane mask |
 | `0xC0` | CPU | Firmware version |
 | `0xC4`-`0xC8` | Hardware | Hardware version and engine state |
-| `0xCC` | MCU/CPU | Published-result lane selector |
-| `0xD0`-`0xEC` | Hardware | Selected immutable lane record |
+| `0xCC` | MCU/CPU | Published-result lane selector, or platform-diagnostic selector `0xFE` |
+| `0xD0`-`0xEC` | Hardware | Selected immutable lane record; for selector `0xFE`, platform status followed by the seven `0x084`-`0x09C` diagnostics |
 | `0xF0`-`0xF4` | CPU | Response sequence and response code |
 | `0xF8`-`0xFC` | Hardware | Published run ID and aggregate summary |
 
@@ -177,29 +212,18 @@ copies validated request fields into the descriptor registers and writes one
 start doorbell. It then waits for the interrupt, reads the summary, and updates
 the response fields. Acquisition requires no status polling.
 
-External board-MCU firmware can copy or include `mcu/gt_test_mcu_protocol.h`
-for byte-exact wire
-structures covering the request window, status window, and eight-word lane
-record. The header does not assume the MCU is little-endian or permit unaligned
-integer loads: I2C buffers remain arrays of bytes and explicit helpers decode
-them into native request, engine-state, summary, and per-lane result structures.
-It also provides the hardware-equivalent lane-pass predicate and the stricter
-Milestone 3 acceptance predicate, which rejects either counter saturation. It
-is not linked into or required by the MicroBlaze supervisor and has no Xilinx
-or MCU-vendor HAL dependency.
-
-For the TM4C1290NCPDT Apollo firmware, `mcu/cm_mcu/GTTestEngine.c` binds that
-protocol to the existing FreeRTOS-aware `apollo_i2c_ctl_*()` layer. It follows
-`clk_freq_fpga_cmd()` by holding `i2c5_sem`, selecting mux `0x70` channel 2
-for F1 or channel 0 for F2, retaining ownership for the complete operation,
-then clearing the mux before releasing the semaphore.
-
 Write request bytes `0xA4`-`0xBF` before writing the sequence at `0xA0`. To
 collect results, write the desired lane number at `0xCC`, then read its record
 from `0xD0`-`0xEC`. Read `run_id` before and after collecting all lane records;
 if it changes, discard the mixed set and read the newly published immutable
 bank again. This guards against a job completing while the MCU is partway
 through a multi-transaction result collection.
+
+The former repository-local external-MCU protocol header and `cm_mcu` adapter
+were retired on 2026-09-23. They were an unintegrated Milestone-3 draft limited
+to lanes 12--15 and are not part of the current all-links or host-side test
+path. The wire ABI above remains authoritative; current board access uses the
+pinned `cm_interface` checkout described in the repository README.
 
 ## Validation
 
@@ -286,11 +310,13 @@ little-endian value. Write `0xA0` last; changing that sequence number is the
 firmware doorbell. These blocks also respect the six-line CLI copy/paste
 limit. The example selects F1 (`0x04`); use `0x01` for F2, retain the I2C5
 semaphore across every block, and wait for each block's output.
+Write values in copy/paste commands omit redundant leading zeroes; the CLI
+parses the value and `i2cwr` supplies the requested data width.
 
 ```text
 semaphore 5 take
-i2cw  5 70 1 0x04
-i2cwr 5 2b 1 a4 4 0x00000501
+i2cw  5 70 1 0x4
+i2cwr 5 2b 1 a4 4 0x501
 i2cwr 5 2b 1 a8 4 0x3b9aca00
 i2cwr 5 2b 1 ac 4 0x77359400
 i2cwr 5 2b 1 b0 4 0xffffffff
@@ -299,7 +325,7 @@ i2cwr 5 2b 1 b0 4 0xffffffff
 ```text
 i2cwr 5 2b 1 b4 4 0xffffffff
 i2cwr 5 2b 1 b8 4 0xffffffff
-i2cwr 5 2b 1 bc 4 0x0000ffff
+i2cwr 5 2b 1 bc 4 0xffff
 i2crr 5 2b 1 b0 4
 i2crr 5 2b 1 b4 4
 i2crr 5 2b 1 b8 4
@@ -307,7 +333,7 @@ i2crr 5 2b 1 b8 4
 
 ```text
 i2crr 5 2b 1 bc 4
-i2cwr 5 2b 1 a0 4 0x00000001
+i2cwr 5 2b 1 a0 4 0x1
 ```
 
 Here `0x3B9ACA00` is 1,000,000,000 cycles, or five seconds at 200 MHz;
@@ -335,7 +361,7 @@ i2crr 5 2b 1 f0 4
 i2crr 5 2b 1 f4 4
 i2crr 5 2b 1 f8 4
 i2crr 5 2b 1 fc 4
-i2cw  5 70 1 0x00
+i2cw  5 70 1 0x0
 semaphore 5 release
 ```
 
@@ -456,15 +482,53 @@ are not all prerequisites for the reduced smoke gate:
   Capture their link state before and after the soak to detect collateral
   effects from the quad-124 migration.
 
-### Immediate FPGA-image smoke gate
+### FPGA-image smoke gate
 
-The following short gate is sufficient before beginning the planned
-comment-only SystemVerilog pass:
+The current gate target is full Milestone 3 candidate `0x0002000C` (v12).
+Its clean implementation and independent routed audit passed on 2026-09-11:
+WNS `+0.141 ns`, WHS `+0.009 ns`, zero routing errors, worst bus-skew slack
+`+19.437 ns`, exact 112-channel ownership, correct 100.000/325.000-MHz clocks,
+and four routed native-CDR-lock synchronizer pairs. Program the versioned
+compressed artifact
+`build/gt_test_milestone3/gt_test_milestone3.runs/impl_1/gt_test_milestone3_v12.bit`
+(SHA-256
+`35e8ba4ec565c9972e72e3ebf61ee842fd446d2b51d35650f1d9ec2b76ca180f`).
+
+V12 preserves acquisition on `RXPRBSLOCKED`. During measurement, a lane is
+valid only while both `RXPRBSLOCKED` and native `RXCDRLOCK` are asserted; a
+falling qualified-lock edge increments the existing lock-loss count. This
+does not change the MCU register or result-record ABI. One PMA smoke and its
+following 60-second external smoke passed on F1, but other fresh/restart
+attempts failed in `LOCK_WAIT`, including a post-reload PMA attempt. Those
+failures were preserved. After a later explicit reload, PMA and external gates
+passed again and the intended FireFly channel-0 stimulus ran. The module
+reported RX0/TX0 LOS and RX0 CDR LOL, while the FPGA recorded isolated lane-12
+error saturation but no `RXCDRLOCK` transition, no excluded cycles, and zero
+lock losses. V12 is therefore not hardware-qualified.
+
+After the short gate passes, `scripts/run_milestone3_12hour_soak.sh` runs the
+12-hour external soak end to end, mirrors output to the screen and a timestamped
+log, checks status every 30 minutes, and collects final results. Its defaults
+are request sequence 4 and previous sequence 3; optional positional arguments
+override the request sequence, previous sequence, and log path respectively.
+
+The v11 F1 run completed successfully at `2026-09-03T06:24:05+00:00`.
+Lanes 12-15 each reported zero errors, zero lock losses,
+1,113,730,526,168,800 tested bits, 13,921,631,577,110 valid cycles, and
+`BER95 < 2.694e-15`. The full log is
+`docs/evidence/legacy/milestone3_12hour_soak_20260902_182351.log`. Its final mailbox has
+matching request/response sequence `4`, response/summary `0x00040401`, stable
+hardware run ID `3`, and healthy IDLE. Append the final F1 AVTT current and
+FPGA temperature when those readings are available.
+
+Apply the following short gate to every new full-Milestone-3 candidate before
+long tests or fault campaigns. The earlier comment-only SystemVerilog pass was
+already completed after the `0x00020004` integration smoke.
 
 1. Preserve the compressed golden image and verify the candidate bitstream
    hash.
 2. Program the intended FPGA and, through the semaphore/mux procedure above,
-   confirm firmware `0xC0=0x00020004`, hardware `0xC4=0x00020004`, healthy
+   confirm firmware `0xC0=0x0002000C`, hardware `0xC4=0x0002000C`, healthy
    idle `0xC8=0`, and the green status LED.
 3. Run one one-second, all-four-lane PRBS31 job in near-end PMA loopback. Read
    back command, duration, timeout, and all four mask words before committing
@@ -500,6 +564,119 @@ lane 12 independently showed zero errors and lock losses over about 25.78
 billion bits, while the other 108 IBERT-owned channels operated as before.
 Long soaks and fault injection remain later qualification work.
 
+The first 12-hour external-path launch attempted on 2026-08-31 did not enter
+`ST_RUN`. Request sequence 7 completed immediately with platform-fault summary
+`0x04000404`, final mailbox state `C8=0x00010000`, hardware run ID 2, and XSDB
+platform status `0xE1208085`. A subsequent 60-second external smoke after FPGA
+reconfiguration failed the same way. Unlike the already passing PMA-loopback
+path, external mode had changed PRBS controls and proceeded directly to
+counter reset/lock qualification without resetting the RX datapath.
+
+Full-M3 candidate `0x00020005` therefore gave both external and PMA-loopback
+jobs the same bounded initial `GTRXRESET` qualification. External mode still
+keeps `LOOPBACK=000` and does not pulse `RXPMARESET`. Unit simulation covers
+both sequences and retains the first failing controller stage rather than
+overwriting it with the generic fault-state number. That build failed routed
+setup timing and must not be programmed. Candidate `0x00020006` retains this
+functional fix and elaborates full lane engines only for compile-time managed
+lanes; IBERT-owned lanes use deterministic protocol stubs. Its first external
+60-second run entered and completed `ST_RUN` normally, but lane 13 passed while
+lanes 12, 14, and 15 returned saturated error counts despite remaining locked
+with no lock losses. The controller had cleared native PRBS counters before
+waiting for lock and retained all errors accumulated during checker
+acquisition. Candidate `0x00020007` adds a second bounded counter-reset pulse
+after every selected lane is locked and before asserting acquisition-ready,
+so the timed interval begins with clean native counters. It must pass the
+60-second external smoke before restarting the 12-hour soak.
+
+Its first external smoke did not reach the new counter-reset state. AXI
+platform status `0xE08080C4` decoded to a healthy READY quad, healthy RX/PMA
+reset qualifiers, PRBS-controller fault reason `0x80`, and retained stage 8
+(`ST_LOCK_WAIT`). Candidate `0x00020008` therefore makes the acquisition bound
+ten seconds and retains richer first-fault context until FPGA reset. The live
+and captured records include selected/running lanes, current/ever/lost lock
+masks, RX/PMA reset and DRP qualifiers, quad power/QPLL/user clocks/reset-done,
+sequencer state, and its elapsed cycle counter. Python launch/status tools
+select I2C diagnostic page `0xFE` and decode it automatically on a fault.
+The same snapshot can be read without starting or acknowledging a run using
+`python3 scripts/milestone3_platform_diagnostics.py`.
+
+The clean `0x00020008` Vivado 2023.2.2 build completed on 2026-09-01.
+Authoritative routed timing is WNS `+0.139 ns`, TNS `0`, WHS `+0.009 ns`,
+THS `0`, and pulse-width slack `+0.241 ns`, with no failing endpoints. All
+784,712 routable nets are fully routed with zero routing errors; all four
+bus-skew constraints pass with worst slack `+19.358 ns`. Routed DRC has zero
+errors, and the clock report contains 100.000-MHz `clk_100_raw` and
+325.000-MHz `clk_325_raw`. Compression is enabled. The 70,608,035-byte
+bitstream has SHA-256
+`85ef03f28d60b93b1b5bb45546d4745572c9f937638e664d560e81877c067ce0`.
+This image is implementation-qualified but still requires the 60-second
+external-path hardware smoke.
+
+That `0x00020008` smoke subsequently completed normally with healthy platform
+diagnostics, but only lanes 13 and 14 passed; lanes 12 and 15 saturated even
+in separate ten-second runs. The all-lane diagnostic captured partial running
+mask `0x7`. Candidate `0x00020009` keeps external RX live, qualifies the quad
+supervisor directly from the engine ARM interval through lock, waits for a
+stable running mask, and limits persistent lock-loss tracking to acquisition
+and measurement. PMA loopback still performs its RX/PMA resets, and both modes
+retain the post-lock native-counter clear.
+
+The clean `0x00020009` Vivado 2023.2.2 build and independent routed audit
+completed on 2026-09-01. Routed timing is WNS `+0.146 ns`, TNS `0`, WHS
+`+0.009 ns`, THS `0`, and pulse-width slack `+0.243 ns`, with no failing
+endpoints. All 784,597 routable nets are fully routed with zero routing
+errors; all four bus-skew constraints pass with worst slack `+19.601 ns`.
+The clock report contains 100.000-MHz `clk_100_raw` and 325.000-MHz
+`clk_325_raw`. Routed DRC has zero errors and the same five established
+generated-debug/IP and generic-I2C warnings as v8. Compression, the
+112-channel ownership/site audit, and the managed-GT golden-property audit
+pass. The 70,686,055-byte bitstream has SHA-256
+`ded0954bf9c7bfadfac5d2ad3305bb9b38ffe5dc340aad4d29ccf9027cb1742d`.
+This image was implementation-qualified; its subsequent first hardware gate
+failed before acquisition as described below.
+
+The first v9 lane-12 launch did not reach acquisition. The engine remained in
+ARM while diagnostics showed a healthy quad, controller IDLE, synchronized
+running/locked mask `0x1`, and selected mask zero. The stable-mask filter set
+its counter to one when the mask changed but never incremented it while the
+mask remained stable. Candidate `0x0002000A` adds the missing increment and a
+bounded testbench watchdog. Do not reuse the v9 bitstream.
+
+The clean `0x0002000A` Vivado 2023.2.2 build and independent routed audit
+passed on 2026-09-02. Routed timing is WNS `+0.238 ns`, TNS `0`, WHS
+`+0.009 ns`, THS `0`, and pulse-width slack `+0.247 ns`. All 785,339 routable
+nets are fully routed with zero routing errors; all four bus-skew constraints
+pass with worst slack `+19.578 ns`. The 100.000-MHz and 325.000-MHz generated
+clocks, compression, managed quad-124 sites and golden RX properties, and all
+13 IP status checks pass. Routed DRC has zero errors and the same five
+established generated-debug/IP and generic-I2C warnings. The 70,098,947-byte
+bitstream has SHA-256
+`fa4042fd1def68935e34e5c4d282d5db7416cc1182518b3a46c4e2f5fb40d268`.
+It is ready for the short lane-12 external diagnostic and remains
+hardware-unaccepted until that gate and the all-lane 60-second smoke pass.
+
+The first v10 lane-12 diagnostic accepted sequence 2, entered the measurement
+interval, stopped normally, and returned to healthy IDLE, proving the missing
+stable-mask increment was the v9 launch blocker. It did not pass the BER gate:
+lane 12 returned status `0x0000180C`, exactly one native error, zero lock
+losses, no saturation, 257,808,079,360 tested bits, and 3,222,600,992 valid
+cycles. Aggregate `0x01000101` is therefore internally consistent. Repeat the
+same ten-second lane-12 test without reprogramming before the all-lane smoke.
+Repeated exact one-count results would identify the post-lock counter-reset to
+measurement transition as the next boundary to harden.
+
+The clean `0x00020007` Vivado 2023.2.2 build completed on 2026-09-01.
+Authoritative routed timing is WNS `+0.119 ns`, TNS `0`, WHS `+0.009 ns`,
+THS `0`, and pulse-width slack `+0.251 ns`, with no failing endpoints. All
+784,885 routable nets are fully routed with zero routing errors; all four
+bus-skew constraints pass with worst slack `+19.600 ns`. Routed DRC has no
+errors and the same generated-IP/debug warnings as the previous candidate.
+The implemented clock report contains 10.000-ns `clk_100_raw` and 3.077-ns
+`clk_325_raw` periods. Compression and the 112-channel ownership/site audit
+passed. The 70,619,719-byte bitstream has SHA-256
+`3ce07b01b3e7b3c14483897dbd5c00ecc71a1ecdf38779276c266497ed131ce7`.
+
 The deferred comment-only HDL pass was completed after this smoke result. It
 documents lane ownership, mailbox commit semantics, CDC handshakes, atomic
 publication, PMA reset/DRP capture, and fixed clock-monitor ordering in the
@@ -514,9 +691,137 @@ separate `xvlog` parse also accepted every touched module.
 | 3. External path | Run PRBS31 through the intended optical/electrical path for 15 minutes, first per lane and then on all four concurrently. | All selected lanes remain locked with zero unexpected errors. Tested-bit counts agree with valid RX-clock time and line rate. |
 | 4. Isolation and faults | Inject an error into one lane at a time; disable only that lane's link-partner TX to force lock loss; exercise explicit abort and a timeout shorter than duration. Avoid physically disturbing a powered module when the link partner can create the fault safely. | Only the targeted lane reports the injected error or lock loss. Abort and timeout publish atomic partial records with stop reasons 2 and 3. No adjacent lane or IBERT lane is corrupted. |
 | 5. CPU independence | Start a multi-minute four-lane job, halt MicroBlaze after the doorbell, and leave it halted past hardware completion. | HDL stops and publishes, run ID advances once, results remain immutable, and the level interrupt remains pending. After resume, firmware acknowledges the same completed run without restarting it. |
-| 6. One-hour burn-in | Run one uninterrupted external PRBS31 job on all four lanes for one hour. | Zero unexpected errors and lock losses; no counter saturation, timeout, QPLL/reset fault, or result-bank inconsistency. |
+| 6. One-hour burn-in | Run one uninterrupted near-end PMA-loopback PRBS31 job on all four managed lanes for one hour. Record F1 AVTT current and FPGA temperature immediately before and after the run. | Zero errors and lock losses; no counter saturation, timeout, QPLL/reset fault, or result-bank inconsistency. AVTT and temperature remain sane and stable. |
 | 7. Overnight soak | Run one uninterrupted external PRBS31 job for at least 12 hours. Repeat at the normal operating thermal/load condition; add cold/hot operating points when board controls permit safe operation. | Same criteria as the one-hour run. Temperature and supplies remain within board limits, and all 108 IBERT-owned lanes retain their expected post-test state. |
-| 8. Extended qualification | After the overnight run passes, perform a 24-hour run; use 72 hours when qualifying a board/module combination for deployment. | No unexplained error, lock loss, reset, QPLL, firmware, or publication failure. Any failure preserves the complete failing record and environment log. |
+| 8. Extended qualification | After the overnight run passes, execute `scripts/run_milestone3_24hour_qualification.sh`; use 72 hours when qualifying a board/module combination for deployment. | No unexplained error, lock loss, reset, QPLL, firmware, or publication failure. Any failure preserves the complete failing record and environment log. |
+
+The standalone operator procedure for stage 6, including register derivation,
+six-line CLI blocks, completion polling, and result interpretation, is
+[`milestone3-one-hour-soak.md`](milestone3-one-hour-soak.md).
+
+The first stage-4 isolation procedure is the five-minute lane-12 targeted
+error-injection test in
+[`milestone3-targeted-error-injection.md`](milestone3-targeted-error-injection.md).
+
+The explicit-abort portion of stage 4 passed on 2026-08-27. A five-minute
+four-lane PMA-loopback request was stopped through AXI doorbell bit 1 after
+about 62.06 seconds. The result was `0x00040402`, final `C8=0`, and four
+identical partial lane records with zero errors or lock losses and exact
+`tested_bits = valid_cycles * 80` accounting.
+
+The automatic-timeout portion of stage 4 also passed on 2026-08-27. A
+five-minute request with a one-minute timeout published `0x00040403`, returned
+to `C8=0`, and produced zero-error/zero-lock-loss records on all four lanes.
+The measured interval was 60.000 seconds; a one-cycle difference on lane 13
+was accompanied by exactly 80 additional bits and is consistent with the
+asynchronous stop boundary.
+
+The stage-5 CPU-independence test passed on 2026-08-31. After an FPGA reload,
+the MCU committed request sequence 6 and MicroBlaze was halted in its wait
+loop while the hardware engine reported `ST_RUN`. With the CPU still halted,
+hardware completed its first post-reload run: `F8=1`, `FC=0x00040401`, and
+`C8=0x00004000`, while the CPU-owned words correctly remained `F0=F4=0`.
+All four lane records contained 7,734,239,847,600 tested bits,
+96,677,998,095 valid RX cycles, zero errors, zero lock losses, no saturation,
+and exact `tested_bits = valid_cycles * 80` accounting. After XSDB `con`,
+firmware acknowledged the retained result with `F0=6`, `F4=0x00040401`, and
+`C8=0`; `F8=1` and `FC=0x00040401` remained unchanged. This proves that GT
+timing, stop, snapshot, atomic publication, and interrupt retention operate
+without MicroBlaze execution, and that resume does not restart the run.
+
+Before the stage-7 external soak, program the reviewed `0x0002000B` candidate
+and run `python3 scripts/milestone3_60second_external_smoke.py start`. Do not
+start the 12-hour interval unless the short run enters `ST_RUN`, completes
+normally with aggregate `0x00040401`, returns to healthy idle, and publishes
+zero-error/zero-lock-loss records for lanes 12-15. Use
+`scripts/milestone3_12hour_external_soak.py` only after that gate passes.
+
+The accepted 12-hour v11 run satisfies that prerequisite. For the subsequent
+unattended stage-8 run, execute—not source—
+`scripts/run_milestone3_24hour_qualification.sh`. It defaults to request
+sequence `5` after sequence `4`, polls every 30 minutes, logs stdout and stderr
+to both screen and a timestamped file, and collects final results after 48
+checks. When continuing from the accepted soak without reprogramming, require
+the hardware run ID to advance exactly once from `3` to `4`.
+
+The unattended 24-hour v11 external qualification passed. Final results in
+`docs/evidence/legacy/24hour.txt`, captured on 2026-09-10, show matching request/response sequence
+`5`, stable hardware run ID `4`, response/summary `0x00040401`, and healthy
+IDLE. Lanes 12-13 recorded 2,227,461,058,375,760 tested bits over
+27,843,263,229,697 valid cycles; lanes 14-15 recorded
+2,227,461,058,375,680 tested bits over 27,843,263,229,696 valid cycles. Every
+lane had zero errors, zero lock losses, exact 80-bit-per-cycle accounting, and
+`BER95 < 1.347e-15`. No first-fault snapshot was valid. The SSH connection
+died during the run, so the scheduled half-hour watcher output was not
+retained; this is final-state evidence rather than a continuous status record.
+The retained acquisition observation recorded sampled-error mask `0xF`,
+sampled-unlock mask `0`, and maximum clean streak zero. Those startup samples
+were excluded from measurement by the post-observation native-counter reset.
+The exact completion timestamp, final F1 AVTT current, and FPGA temperature
+remain to be appended. At that point, the remaining campaign work was targeted
+measurement-time error injection, forced single-lane lock-loss isolation,
+abort/timeout, and CPU-halted completion; current outcomes follow.
+
+On 2026-09-11, the v11 short fault-path continuation produced three accepted
+results. Sequence 6/run ID 5 injected one TX PRBS error into lane 12 during a
+five-minute near-end-PMA measurement: lane 12 counted exactly one error, lanes
+13-15 remained at zero, all lock-loss counts were zero, and matching summary
+`0x01030401` returned to healthy IDLE. Sequence 7/run ID 6 was explicitly
+aborted through AXI control offset `0x00C` bit 1 and published four coherent,
+clean partial records with summary `0x00040402`. Sequence 8/run ID 7 used a
+60,000-ms timeout on a five-minute request and published four coherent, clean
+partial records with summary `0x00040403`. Every record retained exact
+80-bit-per-cycle accounting.
+
+The sequence-9 CPU-halted-test launch was preserved as a failed acquisition
+and was not retried. Before the CPU could be halted, the near-end-PMA job
+reached the 10-second PRBS `LOCK_WAIT` bound and published run ID 8 with
+summary `0x04000404`. First-fault diagnostics show selected/running mask `0xF`
+but locked/ever-locked mask `0xB`; lane 14 alone never locked. The quad stayed
+READY with power, QPLL, both user clocks, and every TX/RX reset-done qualifier
+healthy. All monitored clocks were present, including `lf_r0_af=322.260 MHz`,
+and both F1 AVTT/CC PMBus pages reported no status fault. This is an internal
+PMA-loopback acquisition failure, so the external module/link partner is not
+in its signal path. FPGA die temperature was unavailable because the deployed
+MCU firmware does not implement the telemetry page. Forced single-lane
+lock-loss isolation remained outstanding after the fault capture.
+
+F1 was subsequently reloaded explicitly with the same audited v11 image, so
+the preserved sequence-9 fault remains a separate historical result rather
+than a silent retry. A fresh post-reload CPU-halted test then passed as
+sequence 1/run ID 1. XSDB halted MicroBlaze at PC `0x220` only after AXI state
+confirmed `ST_RUN`. Hardware completed five minutes independently, published
+summary `0x00040401` and interrupt-pending state `0x00004000`, and advanced the
+run ID exactly once while CPU response sequence/code stayed zero. All four
+lane records were clean and coherent with exact 80-bit-per-cycle accounting.
+After XSDB resumed the processor, firmware acknowledged the same sequence and
+summary, retained run ID 1, and returned to healthy IDLE without relaunching.
+Forced single-lane lock-loss isolation was the remaining qualification item.
+
+The installed F1 FireFly-5 x4 module is physical MCU FireFly index 8, part
+`B0425040011201`; do not use the mutable populated-device preset for this
+operation because it packs F1_5 onto the wrong MCU index. The dedicated
+`scripts/milestone3_firefly_lock_loss.py` helper addresses index 8 directly,
+uses lower-page byte 86 (`0x56`) as the per-channel TX-disable mask, verifies
+each write, and restores the complete original byte in a `finally` path.
+Post-reload sequence 4/run ID 4 disabled only channel 0/global lane 12 for one
+second, and sequence 5/run ID 5 repeated it for ten seconds. Both verified
+`0x00 -> 0x01 -> 0x00` and completed normally with summary `0x01030401`.
+Lane 12 alone saturated at 4,294,967,295 errors; lanes 13-15 remained clean and
+locked, proving correct channel mapping and adjacent-lane isolation. However,
+`RXPRBSLOCKED` did not deassert during either TX-disable interval: lane 12
+retained full valid-cycle accounting, remained locked at stop, and published
+zero lock losses. The required lock-loss indication therefore did not pass,
+so v11 is not fully hardware-qualified despite completing every other listed
+test. Sequence 6/run ID 6 repeated the ten-second interval while reading
+incorrect candidate alarm addresses `0x07` and `0x15`; those zero reads are not
+interpreted as module evidence. Sequence 7/run ID 7 repeated the interval with
+the correct read-to-clear interrupt bytes. During TX disable, LOS byte 3 was
+`0x11` (RX0/TX0) and CDR-LOL byte 5 was `0x01` (RX0), proving the module saw
+the isolated signal and CDR loss. The final FPGA result nevertheless repeated:
+lane 12 alone saturated its error counter, lanes 13-15 stayed clean, and all
+FPGA lock-loss counts were zero. V11's `RXPRBSLOCKED`-based runtime detector
+therefore did not reflect a module-confirmed lock-loss event.
 
 For zero observed errors at 25.78125 Gb/s, one lane tests approximately
 `9.28125e13` bits in one hour, `1.11375e15` bits in 12 hours, and
@@ -539,6 +844,8 @@ Do not average away intermittent failures. On the first unexpected error,
 lock loss, timeout, reset/QPLL fault, version mismatch, or result inconsistency:
 
 1. Stop automatic retries and preserve the published lane records and run ID.
+   Run `python3 scripts/milestone3_dump_results.py` to decode the aggregate and
+   all four records without starting, clearing, or acknowledging another run.
 2. Capture temperature, supply, reference-clock, module, and link-partner
    state without reconfiguring the FPGA.
 3. Repeat a short diagnostic run on the affected lane, then its adjacent lanes.
@@ -592,32 +899,33 @@ vivado -mode batch -source scripts/build_milestone25_bitstream.tcl
 
 On the board, use the existing CLI and manually retain the I2C5 semaphore for
 the entire operation. The example below selects F1 with mux value `0x04`; use
-`0x01` instead for F2. The current `0x00020004` image uses the same corrected
-supervisor behavior and a uniquely bumped build identity. Confirm firmware
-`0xC0=0x00020004`, hardware `0xC4=0x00020004`, and `0xC8=0` at healthy idle
+`0x01` instead for F2. The validated isolated `0x00020004` image uses the same
+corrected supervisor behavior and a uniquely bumped build identity. Confirm
+firmware `0xC0=0x00020004`, hardware `0xC4=0x00020004`, and `0xC8=0` at healthy idle
 before launching a one-second
 near-end PMA-loopback PRBS31 job. The only valid four-lane mask is the low word
 `0x0000F000`; the other three words must be zero. The CLI copy/paste buffer is
 assumed to accept at most six lines, so submit each block below separately and
 wait for its output before submitting the next block. The semaphore remains
-held across all block boundaries.
+held across all block boundaries. Write values omit redundant leading zeroes;
+`i2cwr` pads each value to its requested width.
 
 ```text
 semaphore 5 take
-i2cw  5 70 1 0x04
+i2cw  5 70 1 0x4
 i2crr 5 2b 1 c0 4
 i2crr 5 2b 1 c4 4
 i2crr 5 2b 1 c8 4
-i2cwr 5 2b 1 a4 4 0x00011501
+i2cwr 5 2b 1 a4 4 0x11501
 ```
 
 ```text
-i2cwr 5 2b 1 a8 4 0x000003e8
-i2cwr 5 2b 1 ac 4 0x000007d0
-i2cwr 5 2b 1 b0 4 0x0000f000
-i2cwr 5 2b 1 b4 4 0x00000000
-i2cwr 5 2b 1 b8 4 0x00000000
-i2cwr 5 2b 1 bc 4 0x00000000
+i2cwr 5 2b 1 a8 4 0x3e8
+i2cwr 5 2b 1 ac 4 0x7d0
+i2cwr 5 2b 1 b0 4 0xf000
+i2cwr 5 2b 1 b4 4 0x0
+i2cwr 5 2b 1 b8 4 0x0
+i2cwr 5 2b 1 bc 4 0x0
 ```
 
 ```text
@@ -631,7 +939,7 @@ i2crr 5 2b 1 b8 4
 
 ```text
 i2crr 5 2b 1 bc 4
-i2cwr 5 2b 1 a0 4 0x00000001
+i2cwr 5 2b 1 a0 4 0x1
 ```
 
 Wait at least one second for this job, then read completion:
@@ -649,7 +957,7 @@ two blocks after changing the selector value in the first line. Together
 they read that lane's complete eight-word record:
 
 ```text
-i2cwr 5 2b 1 cc 1 0x0c
+i2cwr 5 2b 1 cc 1 0xc
 i2crr 5 2b 1 d0 4
 i2crr 5 2b 1 d4 4
 i2crr 5 2b 1 d8 4
@@ -666,7 +974,7 @@ i2crr 5 2b 1 ec 4
 After all four lane records are captured, always clean up:
 
 ```text
-i2cw  5 70 1 0x00
+i2cw  5 70 1 0x0
 semaphore 5 release
 ```
 
@@ -693,6 +1001,194 @@ The isolated managed image passed both external optical-loopback and near-end
 PMA-loopback four-lane PRBS31 smoke tests with aggregate `0x00040401`, zero
 errors and lock losses, and final `C8=0`. Proceed to the full Milestone 3
 integration smoke test; defer the comment-only HDL pass until that test passes.
+
+Two v2.5-only Python 3.6 diagnostics support a controlled comparison with the
+later full-M3 external-path failure. After a fresh v2.5 programming operation,
+`scripts/milestone25_historical_external_smoke.py` repeats the original
+one-second, four-lane external test. Reprogram v2.5 again before running
+`scripts/milestone25_external_restart_matrix.py`; it performs two ten-second
+lane-12 external jobs, one lane-13 external job, a four-lane near-end PMA
+recovery job, and two more lane-12 external jobs. It waits internally, prints
+every selected lane record, and retains ordinary BER failures through the end
+of the six-job comparison. A version mismatch, dirty initial sequence/run-ID
+state, transport error, engine-state error, or platform fault stops the matrix.
+
+The 2026-09-02 golden-IBERT control captured in
+`docs/evidence/legacy/Table.xlsx`
+shows Quad 124 channels `MGT_X0Y16` through `MGT_X0Y19` running PRBS31 with
+`Loopback Mode=None`. All four links report locked RX and TX PLLs, zero errors,
+and approximately `1.072e12` tested bits per lane. This demonstrates that the
+current external optical path can carry error-free PRBS31 under the golden
+IBERT controller. In contrast, a freshly programmed preserved v2.5 image
+subsequently saturated the native error counter on all four lanes during its
+first one-second external-path run. Consequently, do not attribute the current
+failure to the optical path or solely to a v2.5-to-v10 RTL regression; the
+remaining investigation is the difference between golden-IBERT and managed
+PRBS acquisition/control behavior.
+
+The subsequent fresh-image v2.5 restart/recovery matrix sharpened that result.
+Lane 12's first ten-second external run accumulated 1,425 native error
+indications, its immediate repeat saturated, and the following lane-13 run
+also saturated. The four-lane near-end PMA run did not recover the checker:
+lanes 12 and 14 reported one error indication per valid RX cycle while lanes
+13 and 15 reported zero. Both later lane-12 external runs saturated. Every job
+entered RUN, stopped normally, retained PRBS lock, and reported no lock-loss
+transition, so this is not an engine-control timeout or result-publication
+failure. The existing RTL enables RX PRBS selection before the corresponding
+TX PRBS selection has crossed its two-stage TXUSRCLK2 synchronizer. The next
+candidate must test staged acquisition: hold RXPRBSSEL disabled, establish TX
+PRBS31 first, enable/restart the RX checker afterward, qualify a stable locked
+and error-free interval, reset the counter, and only then begin measurement.
+
+### Milestone 2.5.1 staged-acquisition experiment
+
+Candidate `0x00020101` implements that experiment in a distinct quad-124-only
+target. It does not replace the preserved `0x00020004` v2.5 image or the full
+Milestone 3 image. The staged controller performs this order:
+
+1. Stabilize the selected lane mask and apply TX PRBS31.
+2. Keep RXPRBSSEL at zero through the normal TX/control settling interval.
+3. Enable RXPRBSSEL, wait another settling interval, and pulse the native PRBS
+   counter reset.
+4. Wait for every selected checker to report locked, then require one
+   millisecond of continuously locked and sampled-error-free operation. Any
+   sampled error or unlock restarts this qualification; the existing bounded
+   operation timeout prevents an infinite wait.
+5. Pulse the native counters again so acquisition history is excluded, then
+   enter the requested timed measurement.
+
+Build and audit commands are:
+
+```sh
+scripts/build_milestone251_firmware.sh
+vivado -mode batch -source scripts/build_milestone251_bitstream.tcl
+vivado -mode batch -source scripts/audit_milestone251_routed.tcl
+```
+
+Program
+`build/gt_test_milestone251/gt_test_milestone251.runs/impl_1/gt_test_milestone251.bit`
+into F1 and, from a shell with access to `cm_interface` and `/dev/ttyUL4`, run:
+
+```sh
+python3 scripts/milestone251_acceptance.py
+python3 scripts/milestone251_platform_diagnostics.py
+```
+
+The Python 3.6-compatible script requires fresh zero request/response/run-ID
+state and verifies version `0x00020101`. It runs five internally timed jobs:
+lane-12 external first and repeat, four-lane external, four-lane near-end PMA,
+and lane-12 external after PMA. A result is accepted only when the expected
+selected/pass counts are published, all selected lanes remain locked with no
+lock loss or counter saturation, and every error count is zero. Preserve all
+output whether the hypothesis passes or fails.
+On a platform fault the acceptance script now prints the live and persistent
+selector-`0xFE` page automatically. The standalone diagnostic reader retrieves
+the same snapshot later and does not start, abort, acknowledge, or clear a
+test.
+
+The first hardware attempt reached state 21 with lane 12 selected, running,
+and locked, but timed out after exactly 1,999,999,999 sequencer cycles
+(10.000 s) without finding a continuously clean 1-ms window. All quad and RX
+reset/clock qualifiers were healthy, and the engine returned platform-fault
+summary `0x01000104`. This rules out failure to apply the staged checker or to
+acquire initial lock, but does not yet distinguish sampled PRBS errors from
+brief unlocks during qualification. Do not treat TX-before-RX staging as the
+complete fix based on this image.
+
+### Milestone 2.5.2 fixed-window staged-acquisition experiment
+
+Candidate `0x00020102` retains the staged TX-before-RX control ordering but
+does not require an error-free acquisition window. State 21 instead observes
+exactly 200,000 management-clock cycles (1 ms), records whether each selected
+lane sampled a checker error or unlock, and retains the maximum consecutive
+clean streak. It then pulses the native counters and begins the requested
+measurement. This deliberately tests whether the post-staging counter reset
+can produce a useful measurement even when acquisition itself is not clean.
+
+Build and independently audit it with:
+
+```sh
+scripts/build_milestone252_firmware.sh
+vivado -mode batch -source scripts/build_milestone252_bitstream.tcl
+vivado -mode batch -source scripts/audit_milestone252_routed.tcl
+```
+
+Program
+`build/gt_test_milestone252/gt_test_milestone252.runs/impl_1/gt_test_milestone252.bit`
+into F1. From a shell with `cm_interface` and `/dev/ttyUL4` access, run:
+
+```sh
+python3 scripts/milestone252_acceptance.py
+```
+
+The script requires a freshly programmed `0x00020102` image and zero mailbox
+history. It runs lane-12 external twice, all four lanes external, all four
+lanes in near-end PMA loopback, and lane 12 external once more. It handles all
+sleeps and polling itself. To reread platform diagnostics without changing
+the engine, run:
+
+```sh
+python3 scripts/milestone252_platform_diagnostics.py
+```
+
+For 2.5.2 only, selector `0xFE` diagnostic word `live_rx` is encoded as:
+
+- bits 31:28: lanes that sampled an error during the fixed window;
+- bits 27:24: lanes that sampled an unlock during the fixed window;
+- bits 23:6: maximum consecutive clean streak in management-clock cycles;
+- bit 5: selected-lane error at the terminal sample;
+- bit 4: selected-lane lock at the terminal sample;
+- bit 3: Wizard RX done;
+- bit 2: selected RXRESETDONE;
+- bit 1: selected RXPMARESETDONE;
+- bit 0: fixed-window diagnostic format marker (one).
+
+The build, all three controller simulations, and independent routed audit pass.
+The complete F1 hardware matrix also passed: both lane-12 external runs, the
+four-lane external run, the four-lane near-end PMA run, and the post-PMA
+lane-12 external run all completed with zero errors and zero lock losses.
+Each ten-second lane measured about 257.8 billion bits (`BER95 < 1.164e-11`).
+This accepts fixed observation plus post-acquisition counter reset as the
+working acquisition sequence for the managed quad-124 path.
+
+One diagnostic limitation remains: the acquisition masks and maximum-clean
+streak are cleared when the controller returns to IDLE, so the all-zero values
+printed after these runs do not characterize the preceding 1-ms window. A
+future diagnostics revision should retain them until the next request begins.
+
+### Milestone 2.5.3 retained-observation check
+
+Candidate `0x00020103` makes only that diagnostic-lifetime correction. It
+retains the fixed-window error/unlock masks and maximum clean streak after the
+result handshake and throughout IDLE, then clears them when the next stable
+running mask is accepted. The 2.5.2 physical acquisition sequence is otherwise
+unchanged.
+
+Build and audit commands are:
+
+```sh
+scripts/build_milestone253_firmware.sh
+vivado -mode batch -source scripts/build_milestone253_bitstream.tcl
+vivado -mode batch -source scripts/audit_milestone253_routed.tcl
+```
+
+Program
+`build/gt_test_milestone253/gt_test_milestone253.runs/impl_1/gt_test_milestone253.bit`
+and run:
+
+```sh
+python3 scripts/milestone253_acceptance.py
+```
+
+This focused check performs one ten-second lane-12 external run, applies the
+normal zero-error/zero-lock-loss criteria, and requires a retained nonzero
+maximum clean streak. `milestone253_platform_diagnostics.py` rereads the same
+page without changing engine state. Build, simulation, and routed audit pass;
+the focused F1 hardware confirmation also passes. Lane 12 measured
+257,808,252,880 bits with zero errors and zero lock losses, while the retained
+acquisition observation reported error mask `0`, unlock mask `0`, and the full
+200,000-cycle (1.000-ms) clean streak. Milestone 2.5.3 is the accepted source
+behavior for the next full-M3 integration.
 
 For the targeted-error stage, the injection mechanism is intentionally an AXI
 debug control rather than an MCU policy command. In XSDB select the exact CPU

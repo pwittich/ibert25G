@@ -1,0 +1,449 @@
+Milestone 3 v11 12-hour external soak
+Started: 2026-09-02T18:23:51+00:00
+Request sequence: 4
+Previous sequence: 3
+Status interval: 30 minutes
+Log file: /root/wittich/int_test/milestone3_12hour_soak_20260902_182351.log
+
+Preflight:
+  request sequence = 0x00000003
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000000
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000000
+ response sequence = 0x00000003
+
+Writing 12-hour external soak descriptor:
+Verifying descriptor before commit:
+     register 0xa4 = 0x00010501
+     register 0xa8 = 0x02932e00
+     register 0xac = 0x00000000
+     register 0xb0 = 0x0000f000
+     register 0xb4 = 0x00000000
+     register 0xb8 = 0x00000000
+     register 0xbc = 0x00000000
+  request sequence = 0x00000004
+      engine state = 0x00000002 (RUN)
+
+12-HOUR EXTERNAL SOAK STARTED (43200000 ms).
+Leave the optical path and FPGA undisturbed. The test is timed and stopped entirely in HDL. Use the 'status' stage only for occasional mailbox checks.
+
+Sleeping 30 minutes before status check 1/24.
+
+Status check 1/24: 2026-09-02T18:53:51+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 2/24.
+
+Status check 2/24: 2026-09-02T19:23:52+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 3/24.
+
+Status check 3/24: 2026-09-02T19:53:52+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 4/24.
+
+Status check 4/24: 2026-09-02T20:23:53+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 5/24.
+
+Status check 5/24: 2026-09-02T20:53:53+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 6/24.
+
+Status check 6/24: 2026-09-02T21:23:54+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 7/24.
+
+Status check 7/24: 2026-09-02T21:53:54+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 8/24.
+
+Status check 8/24: 2026-09-02T22:23:55+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 9/24.
+
+Status check 9/24: 2026-09-02T22:53:55+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 10/24.
+
+Status check 10/24: 2026-09-02T23:23:56+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 11/24.
+
+Status check 11/24: 2026-09-02T23:53:57+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 12/24.
+
+Status check 12/24: 2026-09-03T00:23:57+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 13/24.
+
+Status check 13/24: 2026-09-03T00:53:58+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 14/24.
+
+Status check 14/24: 2026-09-03T01:23:58+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 15/24.
+
+Status check 15/24: 2026-09-03T01:53:59+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 16/24.
+
+Status check 16/24: 2026-09-03T02:23:59+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 17/24.
+
+Status check 17/24: 2026-09-03T02:54:00+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 18/24.
+
+Status check 18/24: 2026-09-03T03:24:00+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 19/24.
+
+Status check 19/24: 2026-09-03T03:54:01+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 20/24.
+
+Status check 20/24: 2026-09-03T04:24:01+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 21/24.
+
+Status check 21/24: 2026-09-03T04:54:02+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 22/24.
+
+Status check 22/24: 2026-09-03T05:24:03+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 23/24.
+
+Status check 23/24: 2026-09-03T05:54:03+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000002
+ response sequence = 0x00000003
+     response code = 0x00040401
+   hardware run ID = 0x00000002
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+RUNNING: the HDL engine remains in its measurement interval.
+
+Sleeping 30 minutes before status check 24/24.
+
+Status check 24/24: 2026-09-03T06:24:03+00:00
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000000
+ response sequence = 0x00000004
+     response code = 0x00040401
+   hardware run ID = 0x00000003
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+
+COMPLETE: firmware has acknowledged the requested sequence.
+
+Collecting final results: 2026-09-03T06:24:04+00:00
+Final 12-hour external soak state:
+  request sequence = 0x00000004
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+      engine state = 0x00000000
+ response sequence = 0x00000004
+     response code = 0x00040401
+   hardware run ID = 0x00000003
+  hardware summary = 0x00040401
+  firmware version = 0x0002000b
+  hardware version = 0x0002000b
+ response sequence = 0x00000004
+     response code = 0x00040401
+  hardware summary = 0x00040401
+      engine state = 0x00000000
+     stable run ID = 0x00000003
+
+Published lane records:
+lane 12: id/status=0x0000180c, errors=0, lock_losses=0, tested_bits=1113730526168800, valid_cycles=13921631577110, BER95<2.694e-15
+lane 13: id/status=0x0000180d, errors=0, lock_losses=0, tested_bits=1113730526168800, valid_cycles=13921631577110, BER95<2.694e-15
+lane 14: id/status=0x0000180e, errors=0, lock_losses=0, tested_bits=1113730526168800, valid_cycles=13921631577110, BER95<2.694e-15
+lane 15: id/status=0x0000180f, errors=0, lock_losses=0, tested_bits=1113730526168800, valid_cycles=13921631577110, BER95<2.694e-15
+
+12-HOUR EXTERNAL SOAK PASSED.
+Record the final F1 AVTT current and FPGA temperature with these results.
+
+Completed: 2026-09-03T06:24:05+00:00
+Complete log: /root/wittich/int_test/milestone3_12hour_soak_20260902_182351.log

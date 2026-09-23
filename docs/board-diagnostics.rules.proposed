@@ -1,0 +1,11 @@
+# PROPOSAL ONLY: not in an active .codex/rules directory.
+# Review the launcher and its dependencies before installing this allow.
+# These files are mutable; path matching does not pin their contents.
+prefix_rule(
+    pattern = ["python3", "/nfs/cms/hw/wittich/25G_2/vu13p_ibert_25g/scripts/board_diagnostics.py",
+               ["clocks", "modules", "results", "temperatures"]],
+    decision = "allow",
+    justification = "Fixed F1 diagnostics; module flags clear on read and result reads select lane pages. No run, reset, programming, or CDR writes.",
+    match = ["python3 /nfs/cms/hw/wittich/25G_2/vu13p_ibert_25g/scripts/board_diagnostics.py clocks"],
+    not_match = ["python3 /nfs/cms/hw/wittich/25G_2/vu13p_ibert_25g/scripts/board_diagnostics.py program"],
+)
