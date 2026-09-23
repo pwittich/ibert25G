@@ -93,6 +93,45 @@ int main(void)
     uint32_t mask2 = mmio_read(GTTE_BASE, GTTE_MAILBOX_LANE_MASK_0 + 8u);
     uint32_t mask3 = mmio_read(GTTE_BASE, GTTE_MAILBOX_LANE_MASK_0 + 12u);
 
+#ifdef GTTE_ENABLE_TX_SESSION
+    /* Versioned session commands: fixed managed-lane PRBS31 TX lease; no run-ID
+     * increment and no modification of captured receive records. */
+    if (command == 2u || command == 3u) {
+      uint32_t state = mmio_read(GTTE_BASE, 0x010u);
+      uint32_t session = mmio_read(GTTE_BASE, 0x104u);
+      uint32_t valid = (state & 0x1ffffu) == 0u && timeout == 0u &&
+                       mask0 == GTTE_MANAGED_MASK0 &&
+                       mask1 == GTTE_MANAGED_MASK1 &&
+                       mask2 == GTTE_MANAGED_MASK2 &&
+                       mask3 == GTTE_MANAGED_MASK3;
+      if (command == 2u)
+        valid = valid && duration > 0u && duration <= 86400000u && !(session & 1u);
+      else
+        valid = valid && duration == 0u;
+      if (valid) {
+        uint32_t polls = 0u;
+        if (command == 2u) mmio_write(GTTE_BASE, 0x10cu, duration);
+        mmio_write(GTTE_BASE, 0x100u, command == 2u ? 1u : 2u);
+        do {
+          session = mmio_read(GTTE_BASE, 0x104u);
+          polls++;
+        } while (polls < 1000000u && !(session & 4u) &&
+                 (command == 2u ? (session & 0x11u) != 0x11u
+                                : (session & 0x11u) != 0u));
+        valid = !(session & 4u) &&
+          (command == 2u ? (session & 0x11u) == 0x11u
+                         : (session & 0x11u) == 0u);
+        // Never leave an unacknowledged transmitter lease running. A failed
+        // start is fail-closed and cannot be followed by an RX descriptor.
+        if (!valid && command == 2u) mmio_write(GTTE_BASE, 0x100u, 2u);
+      }
+      mmio_write(GTTE_BASE, GTTE_MAILBOX_RESPONSE_CODE, valid ? 0u : 1u);
+      mmio_write(GTTE_BASE, GTTE_MAILBOX_RESPONSE_SEQUENCE, sequence);
+      handled_sequence = sequence;
+      continue;
+    }
+#endif
+
     if (!validate_request(command, duration, mask0, mask1, mask2, mask3)) {
       mmio_write(GTTE_BASE, GTTE_MAILBOX_RESPONSE_CODE, 1u);
       mmio_write(GTTE_BASE, GTTE_MAILBOX_RESPONSE_SEQUENCE, sequence);

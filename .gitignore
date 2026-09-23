@@ -11,3 +11,25 @@
 *.sim/
 *.xpr
 
+# Python/test caches
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Xilinx simulation products created outside build/
+/xsim.dir/
+/xelab.pb
+/xvlog.pb
+/*.wdb
+/*.vcd
+/*.fst
+
+# Editor, OS, and NFS temporary files
+*~
+*.swp
+*.swo
+.DS_Store
+.nfs*
