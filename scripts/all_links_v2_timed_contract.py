@@ -28,6 +28,38 @@ DIRECT_MASKS = {
 FIREFLY_QUADS = tuple(range(121, 135))
 
 
+def add_predecessor_arguments(parser):
+    for site in ("f1", "f2"):
+        parser.add_argument("--%s-sequence" % site, type=int,
+                            help="optional expected sequence (default: read current state)")
+        parser.add_argument("--%s-run" % site, type=int,
+                            help="optional expected run ID (supply all four guards)")
+
+
+def parse_predecessors(parser, args):
+    values = (args.f1_sequence, args.f1_run, args.f2_sequence, args.f2_run)
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        parser.error("supply all four --f1/--f2 sequence/run guards or omit them all")
+    for sequence, run in ((args.f1_sequence, args.f1_run),
+                          (args.f2_sequence, args.f2_run)):
+        if not 0 <= sequence <= 0xfffffffc or not 0 <= run < 0xffffffff:
+            parser.error("sequence/run guards must leave room for three sequences and one run")
+    return {"F1": (args.f1_sequence, args.f1_run),
+            "F2": (args.f2_sequence, args.f2_run)}
+
+
+def predecessor_cli_arguments(predecessors):
+    arguments = []
+    if predecessors is not None:
+        for site in ("F1", "F2"):
+            sequence, run = predecessors[site]
+            arguments.extend(["--%s-sequence" % site.lower(), str(sequence),
+                              "--%s-run" % site.lower(), str(run)])
+    return arguments
+
+
 def mask_lanes(words):
     return tuple(lane for lane in range(112)
                  if words[lane // 32] & (1 << (lane % 32)))

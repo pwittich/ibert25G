@@ -1,6 +1,37 @@
 # All-links v2 timed link tests
 
+For deployment and direct-on-blade command examples, see [HOWTO.md](../HOWTO.md).
+
+## Operator commands after deploying the updated runtime
+
+On the blade, from the directory containing the scripts and its clean
+`cm_interface` checkout:
+
+```sh
+python3 all_links_v2_timed_status.py
+python3 -u test_all_links_v2_inter_fpga.py \
+  --duration-seconds 180 --acknowledge-all-firefly-tx
+python3 all_links_v2_timed_status.py
+```
+
+The runner reads and validates current sequence/run state under the MCU lock.
+Manual counters are optional automation guards, not required operator input.
+All FireFly TXs are active during the shared session; the acknowledgement
+confirms the connected equipment can safely receive PRBS31. Use the HOWTO's
+logging example to retain the complete output. Older deployed copies must be
+refreshed before using this interface.
+
 ## Status and scope
+
+On 2026-10-27, one expressly authorized 180-second inter-FPGA run used clean
+`cm_interface` v1.0.3/commit `64260cf23b01c9da987feda1fbf51567240c2c71`
+through a separate archived wrapper with exact tag/commit and runtime hash
+checks. It passed 54/54 fitted receivers at both endpoints with zero errors
+and native lock losses. Final sequence/ack3/run1 is consumed. The released
+launchers' default v1.0.0 pin described below remains unchanged; the v1.0.3
+override applied to that user-authorized run. See
+`docs/all-links-v2-inter-fpga-hardware-gate.md` and
+`build/diagnostic_archive/all-links-v2-timed-inter-fpga-180s-1793111744850372.report.md`.
 
 These launchers target the timing-clean all-links v2 image, identity
 `0x00020501`. The shared contract is released for reviewed, explicitly
@@ -30,7 +61,7 @@ The scripts manage these 25.78125-Gb/s channels:
 ## Clock and telemetry gates
 
 Before the first measurement doorbell, each FPGA must report identity
-`0x00020501`, healthy IDLE, the caller-supplied predecessor sequence/run, and
+`0x00020501`, healthy IDLE, a stable acknowledged predecessor sequence/run, and
 clock status `0x434DA501`. The launcher logs all 37 direct-kHz counters and
 requires:
 
@@ -106,19 +137,17 @@ only the selected FireFly receive quads are measured. The explicit
 python3 scripts/board_all_links_v2_firefly_loopback.py deploy
 python3 scripts/board_all_links_v2_firefly_loopback.py status
 python3 scripts/board_all_links_v2_firefly_loopback.py run q121 \
-  --f1-sequence 0 --f1-run 0 --f2-sequence 0 --f2-run 0 \
   --acknowledge-all-managed-tx
 python3 scripts/board_all_links_v2_firefly_loopback.py run q124-q130 \
-  --f1-sequence 3 --f1-run 1 --f2-sequence 3 --f2-run 1 \
   --duration-seconds 300 \
   --acknowledge-all-managed-tx
 ```
 
 Only q121--q134 are accepted. A range is inclusive and each selected quad adds
 all four of its global receive lanes. Selection does not limit which
-transmitters the session activates. The example values are illustrative:
-always obtain and review the actual predecessor sequence and run IDs
-immediately before authorizing a run.
+transmitters the session activates. Review the result and final state of one
+test before starting another. The script reads the sequence/run state under
+the MCU lock; copying it into the command is not required.
 
 ## Bidirectional inter-FPGA test
 
@@ -139,7 +168,6 @@ explicit `--acknowledge-all-firefly-tx` option:
 python3 scripts/board_all_links_v2_inter_fpga.py deploy
 python3 scripts/board_all_links_v2_inter_fpga.py status
 python3 scripts/board_all_links_v2_inter_fpga.py run \
-  --f1-sequence 0 --f1-run 0 --f2-sequence 0 --f2-run 0 \
   --duration-seconds 90 \
   --acknowledge-all-firefly-tx
 ```
@@ -149,11 +177,21 @@ known safe for PRBS31 transmission.
 
 ## Replay and evidence rules
 
-The `--f1-sequence`, `--f1-run`, `--f2-sequence`, and `--f2-run` arguments are
-the exact expected predecessor state, not the values to write. The scripts
-derive the next mailbox values and verify every descriptor before the single
-doorbell write. If an SSH connection drops after a request, invoking the same
-command again fails its predecessor check instead of replaying it.
+The operator need not supply sequence numbers or run IDs. While holding the
+MCU lock, the runner reads each endpoint twice, requires a stable healthy IDLE
+snapshot with matching request/response sequences, and logs its actual
+`PREDECESSOR` values. It rechecks readiness after pre-run telemetry and checks
+the current sequence again before each submission. Reports include the
+observed starting values even when they were not supplied as arguments.
+
+The `--f1-sequence`, `--f1-run`, `--f2-sequence`, and `--f2-run` arguments remain
+optional expected-state guards for automation. Supply all four or omit them
+all. The scripts derive the next mailbox values and verify every descriptor
+before the single doorbell write. A stale explicitly guarded invocation is
+rejected. With automatic discovery, rerunning the same command after a
+completed test starts a new test; it is not a resume or exactly-once retry
+mechanism. After an uncertain SSH result, preserve the evidence and inspect
+state before any new invocation. No hardware action is retried automatically.
 
 Use either launcher's `status` stage immediately before review to capture both
 sites' current request/response sequence, run ID, identity, state, complete

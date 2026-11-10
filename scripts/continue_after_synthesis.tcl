@@ -17,6 +17,7 @@ source [file join $script_dir validate_synthesized_design.tcl]
 close_design
 
 reset_run impl_1
+set_property STEPS.WRITE_BITSTREAM.ARGS.BIN_FILE true [get_runs impl_1]
 launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
 if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} {
@@ -42,3 +43,7 @@ if {[regexp {Timing constraints are not met} $timing_text]} {
 puts "Timing constraints met: $timing_rpt"
 puts "Bitstream compression: $bitstream_compress"
 puts "Bitstream: [file join $impl_dir top.bit]"
+if {![file isfile [file join $impl_dir top.bin]] || [file size [file join $impl_dir top.bin]] == 0} {
+  error "Implementation did not produce a nonempty top.bin"
+}
+puts "Binary configuration: [file join $impl_dir top.bin]"

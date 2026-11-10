@@ -1,6 +1,175 @@
 # VU13P IBERT Build State
 
-Last updated: 2026-09-20
+Last updated: 2026-11-09
+
+## Build output update — 2026-11-09
+
+Golden project creation enables `STEPS.WRITE_BITSTREAM.ARGS.BIN_FILE`, and
+the synthesis-continuation flow sets it on the existing implementation run.
+Both build entry points require nonempty `top.bin` alongside `top.bit` in
+`build/vu13p_ibert_25g.runs/impl_1/`. The standard and timing-hardened
+control-boundary all-links v2 checkpoint writers now use
+`write_bitstream -bin_file`, reject an existing BIT or BIN, and require a
+nonempty sibling BIN. The hardened writer prints both SHA-256 hashes.
+Compression and existing checkpoint/audit gates are preserved. No FPGA build,
+artifact regeneration, programming, or hardware test accompanied this edit.
+Validation: Tcl completeness and `git diff --check` pass. Vivado 2023.2.2
+accepted and read back the BIN_FILE run property in a temporary empty project;
+its installed `write_bitstream` help confirms `-bin_file` emits BIN in addition
+to BIT. Log: `build/logs/verify_vivado_bin_option-20261109T154049Z.log`.
+
+On the user's subsequent request, BIN files were extracted directly from the
+existing historical golden BIT, compressed golden BIT, and exact audited
+timing-hardened all-links v2 BIT. Outputs are under
+`build/configuration_bins_20261109/`, with `manifest.json` recording source
+paths, source/output SHA-256 hashes, BIT header metadata and payload offsets,
+and `SHA256SUMS` listing the BIN hashes. Each BIN was verified byte for byte
+against the complete source configuration payload, and all source BIT hashes
+were rechecked unchanged. Only container headers were removed; no byte/bit
+swapping or padding was applied. The historical golden remains uncompressed;
+the other two retain their original compression. No synthesis, implementation,
+checkpoint re-emission, programming, or hardware action was performed.
+
+| BIN under `build/configuration_bins_20261109/` | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `golden_ibert_historical.bin` | 113,318,376 | `1b3a7c0148cfba2813c29b5a3be4f362a42e3325144c8774795ad34e7f689087` |
+| `golden_ibert_compressed.bin` | 70,389,172 | `5563fb5ef3eeac7801bd9161873e992a410102cfdc34da827b441f2db3afbd74` |
+| `all_links_v2_timing_hardened.bin` | 70,100,232 | `8dd5ec7d1b0de9508c9ee30aac3efd678e0c2a285393c6b85dbc27a31fb87add` |
+
+All three pass `sha256sum -c SHA256SUMS` from that output directory. README
+links the generated files and manifest; they remain ignored by Git. Existing
+BIT-based deployment pins are unchanged.
+
+## Resume summary and current limits
+
+The last live observation is the **2026-10-27** post-test status, not a new
+hardware read on October 28. Apollo 3010 F1/F2 both run audited all-links v2
+`0x00020501`, healthy IDLE/session-off `0x00100000`, sequence/ack **3**, run
+**1**, summary `0x00363601`, with required clocks valid. The three-minute
+direct test passed 54/54 fitted receivers/site with zero errors/native losses
+at about 4.64055e12 bits/lane. No further agent-issued hardware action has been performed
+for the script, documentation, presentation or memory updates. Recorded
+sequences1--3/run1 remain consumed; do not replay the archived launcher.
+
+**Deployment gap:** the actual remote v1.0.3 bundle is
+`/tmp/all-links-v2-status-v103-20261027`. It still contains the runtime used
+for the measured, explicitly guarded test. Automatic sequence/run discovery
+is implemented and tested **only in the local repository**, not deployed or
+hardware-tested. `/home/cms/25G-v1.0.3` in the HOWTO/slides is a proposed
+persistent installation path, not a completed deployment. The ordinary
+workstation wrappers still pin v1.0.0 and use the old SSH-jump defaults.
+Preserve the archived v1.0.3 wrapper; its consumed run command is not a tool
+for starting another test. Use direct SSH to the blade when on lnx4189.
+
+The user prefers v1.0.3 (`64260cf23b01c9da987feda1fbf51567240c2c71`), rejects
+manual sequence bookkeeping, and correctly identified raw MCU DONE pins as
+**active low** (bit0 F1, bit1 F2). Programming is initial setup only when the
+correct healthy image is not already loaded, not a prerequisite to every
+test. Programming the exact BIT with Hardware Manager includes the embedded
+MicroBlaze ELF in BRAM initialization data, just as XSDB programming does.
+
+## Documentation and presentation delivered
+
+`HOWTO.md` now opens with the simplified direct-on-blade 180-second command
+and recorded results, then covers deployment, FireFly quad sets, optional
+explicit state guards, logs and cleanup. It distinguishes all112 TX enable
+from selected RX measurement. The direct CLI still uses fixed 54-receiver
+fitted masks/site; arbitrary 2xx or mixed-quad selections are not implemented.
+
+The user requested a talk for LHC physicists and engineers. Current artifacts:
+
+- `docs/presentations/vu13p_25g_project_talk.pptx` / `.pdf`: **28 slides**;
+  early how-to on slides2--4, actual results on slide5, editable FPGA
+  firmware block diagram on **slide9**, three technical backups at the end.
+- `docs/presentations/vu13p_25g_project_talk_speaker_notes.txt` and
+  `docs/presentations/assets/`: notes and standalone BER/telemetry plots.
+- `docs/presentations/make_project_talk.py` plus its README: reproducible
+  generation from the archived hardware log. All slide numbers/notes/shape
+  bounds were checked; PDF and diagram were rendered and inspected.
+- `docs/fpga-firmware.md` and `docs/fpga-firmware-block-diagram.{svg,png}`:
+  standalone diagram. It shows I2C directly accessing the hardware mailbox,
+  a 200-MHz MicroBlaze / 32-KiB BRAM subsystem, AXI and IRQ/Wakeup, parallel
+  measurement/result logic, 28 quad controllers and 112 GTYs.
+
+The live-test result predates the automatic-counter CLI change; document the
+hardware pass and the later offline-tested interface as separate evidence.
+No commit was made. The working tree includes these deliverables and source
+changes; leave unrelated `.agents/` files alone.
+
+## Operator script update: automatic sequence/run discovery
+
+Following the user's interface review, both timed test CLIs and their
+workstation wrappers now allow sequence/run arguments to be omitted. The test
+process reads coherent idle snapshots while owning the MCU lock, rejects
+pending/busy/faulty/version-mismatched state, logs actual `PREDECESSOR` values,
+and retains readiness and sequence checks before submission. All four legacy
+arguments remain optional explicit state guards for automation. Reports record
+the discovered starting values. A normal unguarded reinvocation is a new test,
+not an exactly-once retry. All **15 focused offline tests pass**, including
+state-change/busy/fault rejection, CLI forwarding, optional guards and report
+starting-state capture. Changed runtime scripts pass Python-3.6 grammar checks;
+documented shell examples parse. The source change did not deploy files or start a hardware test;
+the last measured state remains sequence/ack3/run1 as recorded below.
+
+## Current hardware update: Apollo 3010 F1 and F2 reprogrammed
+
+On 2026-10-27 the exact audited all-links v2 BIT and matching ELF hashes were
+verified, and the fixed `all_links_v2_f1` programmer loaded F1 on Apollo 3010.
+Fresh XVC enumeration at `apollo3010-1:2542` showed exactly two `xcvu13p`
+targets, and the programmer emitted `PROGRAM_F1_COMPLETE`. The programming log
+is `build/diagnostic_archive/firefly1-all-links-v2-F1-program-1793110477206097.log`.
+The prior four-device enumeration came from an older `hw_server` session that
+had connected to blade 3017-1; it was not used for programming.
+
+Using a clean `cm_interface` v1.0.3 checkout for read-only verification, F1
+reported firmware/hardware `0x00020501`, healthy IDLE/session-off at
+sequence/ack 0, run 0, and valid clock status `0x434DA501`. Its required
+200/100/325-MHz fabric clocks and twelve managed-GTY reference clocks were in
+range. At that point F2 was unconfigured: its generic I2C address did not
+acknowledge and MCU raw FPGA DONE was `0x02`. These signals are active low.
+
+The user then authorized F2 programming and read-only checks. The fixed
+`all_links_v2_f2` programmer selected target 4 after checking exactly two
+`xcvu13p` devices and the pinned BIT/ELF hashes. It reported
+`PROGRAM_F2_COMPLETE` and a running F2 MicroBlaze, then XSDB aborted during
+shutdown with `Tcl_FindHashEntry on deleted table` (exit 134). No programming
+retry followed. Evidence is
+`build/diagnostic_archive/firefly1-all-links-v2-F2-program-1793111080326955.log`.
+
+Independent read-only verification passed using clean `cm_interface` v1.0.3,
+commit `64260cf23b01c9da987feda1fbf51567240c2c71`, over direct SSH from
+lnx4189 to `cms@apollo3010-1`. Both sites report firmware/hardware
+`0x00020501`, healthy IDLE/session-off `0x00100000`, sequence/ack/run 0/0/0,
+valid clock status and all required fabric/managed-GTY reference clocks in
+range. MCU runtime DONE `0x00` confirms both configured (active low). Full
+telemetry completed: 12-V input 11.960938 V / 15.906250 A / 190.253662 W;
+F1/F2 diode temperatures 50.5625/46.09375 C; all 28 LGA80D temperature reads
+and six physical FireFly module temperatures were finite. The complete log is
+`build/diagnostic_archive/all-links-v2-readonly-v103-after-F2-1793111080326955.log`.
+The user then authorized one 180-second inter-FPGA PRBS31 test, expressly
+requested `cm_interface` v1.0.3, and confirmed equipment connected to all
+outward FireFly outputs can safely receive PRBS31. The unchanged released test engine ran via
+a separate wrapper that pins clean v1.0.3/tag/commit, verifies runtime hashes,
+and uses direct SSH to the temporary bundle under
+`/tmp/all-links-v2-status-v103-20261027` on Apollo. Both sites passed all 54
+fitted receivers with zero errors/native lock losses over about 4.64055e12
+bits per lane. Both session stops completed; final independent status confirms
+healthy IDLE/session-off, sequence/ack 3, run 1, summary `0x00363601`, and valid
+required clocks. Sequences 1--3/run 1 are consumed; do not replay them.
+
+All four telemetry snapshots completed: power 189.943/207.787/207.499/208.246 W
+(the immediate post-stop ADC sample was not yet settled), peak sampled F1/F2
+diodes 52.656/48.031 C, LGA80D 51.375 C, FireFly 45 C. Final settled status
+read 189.226 W and F1/F2 diodes 50.406/46.844 C. No retry/reset/reload followed.
+The released user-facing launchers retain their v1.0.0 pin; the v1.0.3 override
+is scoped to this explicitly authorized run. Evidence:
+
+- `build/diagnostic_archive/all-links-v2-timed-inter-fpga-180s-1793111744850372.log`
+- `build/diagnostic_archive/all-links-v2-timed-inter-fpga-180s-1793111744850372.report.md`
+- `build/diagnostic_archive/all-links-v2-timed-inter-fpga-180s-1793111744850372.launcher.py`
+- `build/diagnostic_archive/all-links-v2-timed-status-1793113074559486.log`
+
+Historical run-5 state below predates these reloads and this new run.
 
 ## Current development: all-links v2 timing-clean build candidate
 
@@ -282,7 +451,7 @@ counters, logs, warnings and limitations: docs/v6-direct-quad-qualification.md.
 ## Historical FireFly chronology
 
 The status labels below were current when recorded. They do not supersede the
-all-direct v12 state at the top of this file.
+latest observed all-links v2 state at the top of this file.
 
 CURRENT CLOSEOUT PASS: F2seq24/run8 clean10s all12PRBS31,000C0C01,zeroerrors/
 native losses. FinalF1seq17/run0 F2seq25/run8 healthyIDLE,sessionsoff,clocks
@@ -796,7 +965,7 @@ stimulus occurred. See `docs/v271-hardware-baselines.md` and
 
 The entries below preserve state transitions and evidence. Any embedded
 “latest,” “next,” “pending,” or resume instruction is historical and does not
-supersede the current all-direct v12 resume point above.
+supersede the current all-links v2 resume point above.
 
 HISTORICAL V270 TIMED-ALARM RUN: F1 was v270 IDLE, sequence/run ID 1 after explicit
 reload via board_program.py. Repeated F1_5 alarms FF/FF in IDLE -> 00/00 during

@@ -3,7 +3,8 @@
 import argparse
 
 from all_links_v2_timed_contract import (DEFAULT_DURATION_SECONDS,
-                                       validate_duration)
+                                       add_predecessor_arguments, parse_predecessors,
+                                       predecessor_cli_arguments, validate_duration)
 from board_all_links_v2_timed_common import deploy, results, run_remote, status
 
 
@@ -11,9 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=("deploy", "status", "results",
                                           "run"))
-    for site in ("f1", "f2"):
-        parser.add_argument("--%s-sequence" % site, type=int)
-        parser.add_argument("--%s-run" % site, type=int)
+    add_predecessor_arguments(parser)
     parser.add_argument("--acknowledge-all-firefly-tx", action="store_true")
     parser.add_argument("--duration-seconds", type=int,
                         default=DEFAULT_DURATION_SECONDS,
@@ -28,21 +27,16 @@ def main():
     if args.stage == "results":
         results()
         return 0
-    values = (args.f1_sequence, args.f1_run, args.f2_sequence, args.f2_run)
-    if any(value is None for value in values):
-        parser.error("run requires both sites' --sequence and --run values")
+    predecessors = parse_predecessors(parser, args)
     if not args.acknowledge_all_firefly_tx:
         parser.error("run requires --acknowledge-all-firefly-tx")
     try:
         validate_duration(args.duration_seconds)
     except ValueError as error:
         parser.error(str(error))
-    arguments = ["--f1-sequence", str(args.f1_sequence),
-                 "--f1-run", str(args.f1_run),
-                 "--f2-sequence", str(args.f2_sequence),
-                 "--f2-run", str(args.f2_run),
-                 "--duration-seconds", str(args.duration_seconds),
-                 "--acknowledge-all-firefly-tx"]
+    arguments = predecessor_cli_arguments(predecessors) + [
+        "--duration-seconds", str(args.duration_seconds),
+        "--acknowledge-all-firefly-tx"]
     run_remote("test_all_links_v2_inter_fpga.py", arguments,
                "inter-fpga-%ds" % args.duration_seconds)
     return 0

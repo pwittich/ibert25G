@@ -1,0 +1,139 @@
+SLIDE 01
+Audience: experimental particle physicists and detector/readout engineers. Suggested talk duration: 25 minutes, followed by the three backup slides. The motivation is reproducible physical-link measurement before detector framing and application traffic. The current candidate is an autonomous managed-GTY PRBS engine, not a vendor IBERT core. All architecture and performance numbers in this talk are specific to the recorded VU13P build and bench evidence.
+
+Evidence: Apollo / Cornell rev3 • all-links v2 • project evidence through 27 October 2026
+
+SLIDE 02
+Start the talk with the operator view. Both FPGAs must already contain the audited all-links v2 bitstream; it includes the MicroBlaze program. Deploy the updated scripts and clean cm_interface v1.0.3 before using the simplified commands. The old temporary bundle used for the original hardware run predates automatic sequence discovery. The /home/cms/25G-v1.0.3 directory shown here is the persistent installation example in HOWTO.md, not a claim that it has already been installed on a particular blade. SSH directly to the intended blade. The status script checks both identities and required clocks and reads board telemetry. Require healthy idle/session-off state before testing. The test process acquires the MCU lock, discovers stable sequence/run state itself and rechecks it before submitting commands. No operator bookkeeping is required. All optical partners must tolerate PRBS31 because the firmware has one shared TX session enable.
+
+Evidence: HOWTO.md, Quick start and deployment; all_links_v2_timed_status.py
+
+SLIDE 03
+Use this as orientation, not a request to execute another run. The detailed guide is HOWTO.md. SSH directly to the blade from lnx4189; no extra same-host jump is necessary. The maintained script source lives in this repository, while the tested v1.0.3 bundle is copied to the blade. The ordinary workstation wrappers still pin v1.0.0; the explicitly authorized October v1.0.3 run used a separately archived wrapper with exact tag/commit checks. The updated scripts automatically read stable sequence/run state under the MCU lock, log it, and recheck readiness before TX start. All four predecessor flags remain optional guards for automation. A repeated unguarded command is a new test; inspect state after uncertain completion rather than automatically rerunning it. The direct script writes complete lane records and snapshots; workstation wrappers also write an immutable Markdown report. Direct-on-blade invocations need their own captured log. Run status after the test exits to verify cleanup.
+
+Evidence: HOWTO.md; scripts/test_all_links_v2_inter_fpga.py; all_links_v2_timed_status.py
+
+SLIDE 04
+This is the alternative optical-path test, not an additional command to run as part of every direct-link procedure. Select a physically connected set within q121 through q134. A single quad, inclusive ranges and comma-separated combinations are accepted. The same receive set is measured at both F1 and F2, with four lanes per selected quad. On the recorded bench q121–q124 self-loop independently on each site. The receive selector does not limit TXs; all112 per FPGA send PRBS31 during the shared session. The direct runner currently uses its fixed54 fitted receivers at each endpoint and has no arbitrary2xx selector. The example omits manual sequence/run arguments because the updated runtime discovers them. Preserve stdout/stderr in a unique log as described in HOWTO.md. After completion run the status script and inspect the result before starting a new measurement.
+
+Evidence: HOWTO.md; test_all_links_v2_firefly_loopback.py; current selector limits
+
+SLIDE 05
+This is the new 27 October run after fresh programming of the exact audited image on both sites. The user explicitly approved all outward FireFly TX activity and selected cm_interface v1.0.3, clean commit 64260cf23b01c9da987feda1fbf51567240c2c71. F1 and F2 each passed all 54 fitted receive lanes with zero PRBS errors and zero native lock losses. Each lane has about 4.640547e12 valid tested bits. Both sessions stopped at sequence/ack3, receive run1, summary 0x00363601 and healthy idle/session-off state 0x00100000. This measures all fitted direct links in both directions, not all FireFly receivers. Keep it distinct from prior failures and the statistical limits on a short run. The automatic sequence-discovery change was added afterward and verified offline; the actual measured result used the archived explicitly guarded launcher. No new hardware test was run merely to refresh this presentation.
+
+Evidence: 2026-10-27 report: all-links-v2-timed-inter-fpga-180s-1793111744850372.report.md
+
+SLIDE 06
+Relate this to LHC commissioning: many serial links, changing optical connections and startup states, and the need to reproduce a failure without moving the goalposts. A lock indication is a prerequisite, not a BER measurement. The tested-bit denominator, defined window, acquisition policy and preserved failure evidence make results comparable. This project demonstrates physical PRBS testing; detector event protocols, FEC behavior, radiation tolerance and production qualification are outside these results.
+
+Evidence: README.md; HOWTO.md; docs/all-links-v2-inter-fpga-hardware-gate.md
+
+SLIDE 07
+Each FPGA owns 112 GTY channels in 28 quads: 56 optical FireFly lanes and 56 nominal direct FPGA-to-FPGA lanes. The direct test uses 54 fitted receivers per endpoint; F1 global70/71 and F2 global96/97 are omitted. There are twelve physical managed-GT REFCLK buffers per FPGA, with 322.265625-MHz REFCLK0 sources. The 10-Gb/s AXI chip-to-chip lanes are deliberately excluded. The 2.8875-Tb/s figure is nominal aggregate TX capacity per FPGA, not an all-channel measured result.
+
+Evidence: README.md; scripts/all_links_v2_timed_contract.py
+
+SLIDE 08
+Explain the partition in familiar detector terms: host run control, an embedded supervisory endpoint, and a deterministic hardware instrument. MicroBlaze polls for a new mailbox request when idle, validates it and programs the engine. During the acquisition/measurement job it sleeps until the engine interrupt; it does not poll individual lanes. Bounded polling for TX-session application acknowledgement exists in the session control path. The HDL engine and per-lane logic own timing, acquisition, native counters, CDC and immutable publication.
+
+Evidence: src/gt_test_engine_core.sv; firmware/gt_test_milestone2.c; scripts/all_links_v2_timed_common.py
+
+SLIDE 09
+This is a logical block diagram of the actual all-links v2 image, repeated at F1 and F2. The board MCU and its I2C5/mux path are outside the FPGA boundary. The generic 0x2B I2C frontend reads the existing clock monitor below byte address0xA0 and accesses the engine hardware mailbox and published result window above it. This byte path bypasses MicroBlaze. MicroBlaze is an AXI4-Lite master that validates jobs, writes descriptors and handles engine completion, not a software I2C server. Its32-KiB BRAM contains the ELF as bitstream initialization data; MDM provides JTAG debug. Engine completion drives both interrupt and wakeup. The engine includes management-domain control and RX-domain lane measurement logic, so the outline is not a single synchronous clock domain. Explicit CDC handshakes bring coherent lane snapshots to banked management-domain result storage. The four SLR banks contain28 quad controllers distributed6/8/8/6 and manage112 GTY channels. TX and RX PRBS primitives and the DRP error counters are native GT resources. Twelve physical REFCLK0 buffers supply the managed-GT topology. Fabric control runs at200MHz and the monitored100/325MHz clocks come from the MMCM. Arrows are grouped functional interfaces, not a full pin-level netlist or a physical floorplan. Both MCU and MicroBlaze access hardware registers through separate frontends; no high-speed event data traverses I2C or the soft CPU.
+
+Evidence: src/gt_test_direct_quad_v6_core.sv; src/gt_test_engine_core.sv; scripts/create_all_links_v2_project.tcl
+
+SLIDE 10
+The operator may SSH to Linux on the blade. Python sends ASCII FP transactions over the MCU UART, /dev/ttyUL4 on this blade. The MCU selects exactly one FPGA through the 0x70 I2C mux and holds the I2C5 software semaphore for the full transaction. The generic fabric slave is a 7-bit address 0x2B on either FPGA. FPGA selection is outside the register address space. Preserve this access discipline: two actors sharing the UART or mux can otherwise corrupt the apparent transaction context. JTAG/XVC is a separate programming/debug route, not the timed measurement transport.
+
+Evidence: README.md, Generic I2C clock monitor; cm_interface v1.0.3; HOWTO.md
+
+SLIDE 11
+The clock-monitor ABI is retained below 0xA0. The MCU convention rNN corresponds to byte address 4*NN. There are 37 direct-kHz readings in r02–r38 and a format/validity word at r39. 0x434DA501 means valid publication, CM identifier, 37 clocks, format one. The command mailbox occupies 0xA0–0xFF. A result selector exposes eight words for one lane, avoiding a large I2C address space. Show only the grouped map here; the exact request offsets are in the backup slide. The same addresses serve either FPGA after mux selection.
+
+Evidence: README.md; docs/gt-test-engine.md, I2C mailbox; src/gt_test_engine_core.sv
+
+SLIDE 12
+The host writes command, duration, timeout and the 112-bit mask first and verifies each field. It writes the new request sequence last. MicroBlaze accepts a changed sequence, validates the fields, copies them to the executable AXI descriptor and rings one doorbell. A matching response sequence identifies completion. Run IDs identify receive publications; session start and stop do not consume a receive run. The result bank is immutable until a new publication. Software compares run ID across multi-transaction collection. The operator scripts now discover predecessor values while holding the MCU lock. Explicit expected-state guards remain optional for automation; rerunning an unguarded command is a new test, not a resume operation.
+
+Evidence: scripts/all_links_v2_timed_common.py; firmware/gt_test_milestone2.c
+
+SLIDE 13
+The generated subsystem has one MicroBlaze v11 core at 200 MHz, 32 KiB of local instruction/data BRAM through the local memory buses, no caches and no operating system. It has one AXI4-Lite master to the test engine at 0x44A00000. One level-sensitive engine interrupt drives both the Interrupt input and Wakeup[0], so a sleeping core actually resumes. The fixed 0x10 interrupt vector services that source and clears the pending level. MDM provides JTAG debug and a second wakeup source. This avoids a full software platform, external DDR, an AXI interrupt controller, and timing-sensitive software polling of the measurement datapath.
+
+Evidence: scripts/create_milestone3_project.tcl; firmware/gt_test_milestone2.c and .ld
+
+SLIDE 14
+The reproducible build compiles startup assembly and C with matching MicroBlaze little-endian flags and a fixed linker script. The linker places the reset and interrupt vectors, text, data and stack in local BRAM. Tcl adds exactly one matching ELF, scoped to gt_test_milestone3_bd and microblaze_0. The software becomes BRAM initialization contents in the built design. The audited routed checkpoint produces the compressed bitstream. Configuration initializes the memories, releases reset and starts the processor. Thus Hardware Manager and XSDB both load the firmware when programming this exact BIT; a separate debugger download is not needed. The programmer verifies the standalone ELF hash as provenance, but its programming command is just fpga -file. A BIT made without this ELF association would be a different case.
+
+Evidence: scripts/build_all_links_v2_firmware.sh; scripts/create_all_links_v2_project.tcl; bit-generation Tcl
+
+SLIDE 15
+Startup noise must not enter the physics-style exposure denominator. The managed quad sequence stages TX before RX acquisition, retains a fixed 200,000-cycle or one-millisecond observation, and resets native error counters after acquisition/lock. Only then does the requested timed measurement start. External mode keeps LOOPBACK=000 and avoids resetting an already live RX datapath by default. At capture, native error counters are read through DRP and RX requalification completes before publication/cleanup. Acquisition diagnostics remain readable through idle. Near-end PMA loopback uses 010 and a bounded reset sequence; it bypasses the optical path and is a different test.
+
+Evidence: src/gt_test_direct_quad_v6_core.sv; docs/gt-test-engine.md; AGENTS.md, managed-quad behavior
+
+SLIDE 16
+Each lane returns eight 32-bit words: lane/status, 64-bit error field, 64-bit tested bits, native lock losses and 64-bit valid RX cycles. The error ABI is 64 bits, but the exact native GT PRBS error count is a 32-bit saturating counter zero-extended into that field; do not infer 64-bit native dynamic range. The native DRP count comes from 0x25E/0x25F. Tested bits equal 80 times valid RX user-clock cycles. The 80-bit parallel interface at 322.265625 MHz corresponds to 25.78125 Gb/s. Results transfer coherently and the host-visible BRAM bank remains immutable until the next complete publish. Native lock-loss counters do not prove that a link was free of optical disturbances or PRBS errors.
+
+Evidence: docs/gt-test-engine.md, lane record; src/all_links_v2_result_copy_bank.sv; timed-test validators
+
+SLIDE 17
+A VU13P is a large multi-die FPGA. Four SLR banks distribute 28 quads in a 6/8/8/6 pattern. Each quad has its own receive-clock behavior; signals cannot be treated as synchronous to the management clock. The final v2 design transfers each 256-bit lane snapshot as four stable 64-bit handshakes, registers four result-copy banks and releases reset locally with matched latency. The participation mask derives from the accepted receive-lane descriptor. Only acquisition-ready and capture-done reductions neutralize unselected quads. All-quad readiness, fault, reset, idle and TX-session barriers remain intact. V1 incorrectly waited for unselected quads during direct-only acquisition; v2 fixes that functional deadlock without bypassing safety-related barriers.
+
+Evidence: docs/all-links-v2-timing-strategy.md; src/all_links_v1_slr_bank.sv; v2 routed audit
+
+SLIDE 18
+Show worst setup slack as an engineering diagnostic, not a benchmark. The original v2 route missed setup by 0.158 ns; reuse of the audited v1 route still missed by 0.119 ns. The successful change was architectural: registered result banks, narrower CDC transfers and local reset release. Only true control/reset boundaries are hard-contained; publication-only data placement stays soft. Large hard pblocks and speculative timing exceptions were not the solution. The final audit has setup +0.046 ns, hold +0.009 ns, no failing endpoints, 220150 fully routed nets, zero routing/Error-DRC failures and all 476 bus-skew groups meeting. These margins qualify the exact archived implementation, not an arbitrary rebuild.
+
+Evidence: docs/all-links-v2-timing-strategy.md; timing-hardened independent audit
+
+SLIDE 19
+No single test proves the whole system. Functional regressions test direct-only, sparse and all112 selections, changed epochs and session barriers. Synthesis/preflight proves the intended exact inventory: 112 channels, 28 commons/controllers, twelve managed REFCLK buffers, 112 engines, no IBERT or C2C ownership overlap. An independent routed audit checks GT properties against the golden reference, physical reset/participation locality, dedicated reference-clock routing, CDC structure and timing exceptions. The FPGA state-machine encodings are ABI and are protected from recoding. Hashes bind the ELF, checkpoints, BIT and source evidence. Finally the hardware test measures actual links; the earlier checks cannot replace it.
+
+Evidence: README.md; docs/memory/build-state.md; preflight and independent routed audit records
+
+SLIDE 20
+The procedure verifies image identity, healthy idle/session-off state and stable predecessor sequence/run. Updated scripts discover those counters under the MCU lock; explicit expected-state guards remain optional. It logs all clocks and requires 200/100/325-MHz fabric and all twelve 322-MHz managed references. Before starting it records board-wide power and temperatures. Session start on both sites uses a 240-second lease for a 180-second measurement. The session application acknowledgement is required before RX measurement. The host observes both FPGAs simultaneously in RUN and takes telemetry near one-third and two-thirds of the window. It validates complete per-lane publications, then issues normal session stops. The MCU is serialized, and logs survive pass or failure. The command is never automatically retried: an uncertain link to the host must not replay a hardware action.
+
+Evidence: scripts/all_links_v2_timed_common.py; 2026-10-27 180-second evidence log
+
+SLIDE 21
+For a stationary independent rare-error model, the probability of zero errors is exp(−BER*N). Setting this to 0.05 gives a one-sided 95% upper bound −ln(0.05)/N. Use the observed valid-bit denominator rather than simply multiplying nominal rate by wall-clock runtime. Taking the smallest observed lane denominator, N=4640547042800, gives 6.4556e-13. This bound is per lane. Pooling all 108 paths would require an additional common-rate model and is deliberately not done here. Burst errors, startup dependence, pattern dependence and changing conditions require separate studies.
+
+Evidence: Derived from actual tested-bit counts in the 180-second log; one-sided Poisson zero-count limit
+
+SLIDE 22
+These are actual data from the same test, not illustrative curves. The input ADC reports roughly 190 W at idle and 207–208 W while the shared PRBS sessions run. The immediate post-stop ADC sample can still reflect earlier current; a later independent settled status read measured 189.226 W, F1 50.406 C and F2 46.844 C. All 28 LGA80D temperature readings and all six physical FireFly temperatures were read at each snapshot. Across the four recorded snapshots, max LGA80D was 51.375 C and max FireFly 45 C. There are no approved numerical power/temperature trip thresholds in this procedure. Finite readings are evidence completeness, not thermal qualification.
+
+Evidence: Actual pre / one-third / two-thirds / post samples from the 180-second log
+
+SLIDE 23
+Avoid telling an uninterrupted success story. V1 had a deterministic direct-only subset deadlock, fixed by registering quad participation and neutralizing only acquisition/capture reductions. Broad setup failures required changing the source architecture, not accepting a clean route as timing signoff. An earlier 180-second direct gate failed F2 global98 with a saturated counter and zero native lock losses. A separately authorized power cycle and fresh test passed; that supports but does not prove a transient startup explanation. The latest FireFly optical-loopback history still has repeatable low errors on F1 lanes1/3/4/6 with lock maintained; q123/q124 and all selected F2 lanes passed the last 90-second optical run. This is an unresolved optical/link-quality problem, not cured by the latest direct-link pass.
+
+Evidence: docs/all-links-v1-source-milestone.md; timing strategy; inter-FPGA gate; FireFly run-5 report
+
+SLIDE 24
+The receive mask and TX-session mask are intentionally distinct in the current interface. Firmware accepts TX sessions only with all112 managed transmitters selected, on each FPGA. Therefore even a q221–q234 direct-only measurement emits PRBS31 out of all FireFly transmitters. Operators must confirm the connected optical equipment can safely receive it. The FireFly CLI accepts arbitrary quad sets within q121–q134 symmetrically on both sites; the direct CLI currently measures its fixed fitted masks. Arbitrary direct subsets, mixed groups and different optical sets per endpoint need a reviewed CLI extension. Session-off restores the normal no-PRBS session state; it is not a physical FireFly-disable operation. Native lock-loss counters cannot exclude all optical disturbance modes.
+
+Evidence: HOWTO.md; scripts/all_links_v2_timed_contract.py; firmware TX-session validation
+
+SLIDE 25
+Close with three claims supported by the evidence. First, the parallel hardware engine gives explicit acquisition and valid-exposure semantics independent of host scheduling. Second, an I2C mailbox and a small embedded supervisor provide integration without a full CPU platform, while allowing both Hardware Manager and XSDB to load the same firmware-bearing BIT. Third, the exact audited image has measured all54 fitted direct receivers at both endpoints cleanly for180 seconds, with per-lane95% zero-error limits around6.46e-13 under the stated model. The next engineering work is independent TX-class control, a general direct/mixed selector, and targeted optical-path investigation followed by longer BER runs under chosen conditions. These are proposed improvements, not already demonstrated capabilities.
+
+Evidence: Project evidence and HOWTO.md • 27 October 2026
+
+SLIDE 26
+All locations shown are byte addresses in the generic I2C slave. Each word is little-endian. The receive command used in the timed direct and optical procedures is0x00010501: parallel BER opcode, PRBS31, external LOOPBACK=000 and millisecond timebase. Session start is command2, session stop3; they require all112 mask bits and do not advance receive run ID. Selector0xFE exposes live and retained first-fault platform diagnostics at0xD0–0xEC. The normal lane and clock ABI addresses are unchanged. The wide command and response interface is owned by hardware and firmware jointly; direct low-level writes should follow the operator scripts rather than an ad hoc byte sequence.
+
+Evidence: docs/gt-test-engine.md; firmware/gt_test_engine_regs.h; scripts/all_links_v2_timed_common.py
+
+SLIDE 27
+The 37 clock-monitor values are direct-kHz counts relative to the board200-MHz oscillator; entry0 reports the configured nominal reference. They are not an external precision frequency standard. The required managedGT references are registers r11,r12,r14–r23; not every visible REFCLK1 monitor is a required clock for this image. The MCU runtime page0x06 offset0x15 gives raw active-low DONE pins: bit0F1, bit1F2. A low bit means configured. The library enum exposes raw levels and must not be interpreted as active-high configuration status. DONE does not identify which image is running. Read firmware and hardware versions as well. The F2 XSDB load emitted PROGRAM_F2_COMPLETE and showed MicroBlaze running, then crashed during shutdown with Tcl_FindHashEntry on deleted table. Independent MCU/I2C checks and the completed subsequent PRBS test establish loaded behavior; no programming retry was made.
+
+Evidence: README.md; cm_interface v1.0.3 MCU runtime page; October programming logs
+
+SLIDE 28
+Primary operator documentation: HOWTO.md and docs/all-links-v2-timed-tests.md. Architecture and ABI: docs/gt-test-engine.md, noting its historical milestone sections; the current v2 source and timing record supersede its old topology and snapshot-width descriptions. Build integration: scripts/create_all_links_v2_project.tcl, scripts/create_milestone3_project.tcl, scripts/build_all_links_v2_firmware.sh, firmware/gt_test_milestone2.c, firmware/gt_test_milestone2_start.S, firmware/gt_test_milestone2.ld. Physical signoff: docs/all-links-v2-timing-strategy.md and build/diagnostic_archive/all-links-v2-timing-hardened-control-boundary-clean/. Latest measurement: build/diagnostic_archive/all-links-v2-timed-inter-fpga-180s-1793111744850372.log, its report.md sibling and archived launcher.py. Log SHA25624257c790b0562c47c78a951e88912cd07887602c68423600068a244376ccabf. Final status: all-links-v2-timed-status-1793113074559486.log. BIT SHA256163172d938f5aa87fd606061e75e058f5d7040916d86d4744a206309f970b66f; routed DCP323ff58252ae66a81e42c84d38b528ce053561804cdc7eeecb99d3066107993a; ELF d947fd47e684a1e0be08296d34b4de1b1e28d7c056ecabffcbfb681786730f9c. Repository HEAD f75213d plus the recorded October working documentation; this talk does not imply a new RTL release.
+
+Evidence: All sources are in this repository; full references are also in the speaker notes.

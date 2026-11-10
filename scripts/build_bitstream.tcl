@@ -29,3 +29,7 @@ if {[regexp {Timing constraints are not met} $timing_text]} {
 puts "Timing constraints met: $timing_rpt"
 puts "Bitstream compression: $bitstream_compress"
 puts "Bitstream: [file join $impl_dir top.bit]"
+if {![file isfile [file join $impl_dir top.bin]] || [file size [file join $impl_dir top.bin]] == 0} {
+  error "Implementation did not produce a nonempty top.bin"
+}
+puts "Binary configuration: [file join $impl_dir top.bin]"

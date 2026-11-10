@@ -115,6 +115,35 @@ def check_ready(site, box, sequence, run):
             site + " platform diagnostic is not healthy")
 
 
+def resolve_predecessors(boxes, expected=None):
+    """Read stable idle state while the caller owns the MCU lock; never write."""
+    predecessors = {}
+    addresses = (0xc0, 0xc4, 0xc8, 0xa0, 0xf0, 0xf8)
+    for site in ("F1", "F2"):
+        box = boxes[site]
+        first = tuple(box.read_u32(address) for address in addresses)
+        second = tuple(box.read_u32(address) for address in addresses)
+        require(first == second, site + " state changed while reading predecessor; no request issued")
+        fw, hw, state, sequence, response, run = second
+        require(fw == VERSION and hw == VERSION,
+                site + " all-links-v2 identity mismatch")
+        require(state == CAPABILITY,
+                site + " is not healthy IDLE with TX session off")
+        require(sequence == response, site + " request/response sequence mismatch")
+        require(sequence <= 0xfffffffc and run < 0xffffffff,
+                site + " sequence/run exhausted; no request issued")
+        predecessors[site] = (sequence, run)
+        if expected is not None:
+            require(predecessors[site] == expected[site],
+                    site + " predecessor sequence/run mismatch")
+    for site in ("F1", "F2"):
+        sequence, run = predecessors[site]
+        print("PREDECESSOR site=%s sequence=%d run=%d mode=%s" %
+              (site, sequence, run, "explicit" if expected is not None else "auto"),
+              flush=True)
+    return predecessors
+
+
 def submit(site, box, previous, sequence, command, duration_ms, mask):
     require(box.read_u32(0xa0) == previous and box.read_u32(0xf0) == previous,
             site + " sequence changed before submit")
@@ -288,6 +317,7 @@ def _run_external(registry, boxes, receive_masks, predecessors,
                   duration_seconds):
     duration_ms = validate_duration(duration_seconds)
     session_lease_ms = duration_ms + 60000
+    predecessors = resolve_predecessors(boxes, predecessors)
     telemetry_snapshot(registry, "pre")
     for site in ("F1", "F2"):
         check_ready(site, boxes[site], *predecessors[site])

@@ -154,7 +154,9 @@ not commit generated `build/` products.
   `8e56fdf24c038b64f69f26b55f0facb7c77e0537` before every stage.
   The seven required remote runtime files were deployed and independently
   hash-matched on 2026-09-20; no hardware action accompanied that sync.
-  Preserve explicit predecessor sequence/run arguments and do not retry. See
+  Discover sequence/run state under the MCU lock by default; preserve the
+  optional explicit predecessor guards for automation and do not automatically
+  retry hardware actions. See
   `docs/all-links-v2-timed-tests.md`.
   Subsequent q121--q123 FireFly external-loopback run3 failed on F1 lanes
   1/3/4/6 (83/391/309/5 errors) and F2 lane4 (3 errors). The user's one

@@ -5,7 +5,51 @@ FPGA-to-FPGA GTY links on the Apollo Cornell rev3 dual-VU13P board. The same
 bitstream is intended for either FPGA site because the relevant pinout and
 clocking are identical at this level.
 
-## Current status — 2026-09-20
+## Current status — 2026-10-27
+
+For operator steps, quad selection, deployment, logging, and recorded results,
+see [HOWTO.md](HOWTO.md). The guide starts with the three-minute inter-FPGA
+command sequence. The [project talk](docs/presentations/vu13p_25g_project_talk.pptx)
+also opens with practical commands and results before the design discussion;
+a [PDF copy](docs/presentations/vu13p_25g_project_talk.pdf) is available.
+The [FPGA firmware block diagram](docs/fpga-firmware.md) shows the hardware
+I2C path, MicroBlaze subsystem, measurement engine and GTY lanes.
+
+The timed scripts now discover sequence/run state while holding the MCU lock;
+operators can run tests without copying those counters into the command.
+Optional explicit guards remain available for automation. Source changes must
+be redeployed before using the simplified CLI on an existing blade bundle.
+
+On 2026-10-27, F1 on Apollo 3010 was programmed with the exact audited
+all-links v2 bitstream listed below. The fixed programmer verified the BIT and
+ELF hashes, saw exactly two `xcvu13p` targets on `apollo3010-1:2542`, and
+reported `PROGRAM_F1_COMPLETE`; evidence is
+`build/diagnostic_archive/firefly1-all-links-v2-F1-program-1793110477206097.log`.
+F2 was subsequently programmed with the same pinned image, with
+`PROGRAM_F2_COMPLETE` and its MicroBlaze running. XSDB then aborted during
+shutdown with `Tcl_FindHashEntry on deleted table` (exit 134); programming was
+not repeated. Evidence is
+`build/diagnostic_archive/firefly1-all-links-v2-F2-program-1793111080326955.log`.
+Independent read-only checks with clean `cm_interface` v1.0.3 passed on both
+sites: firmware/hardware `0x00020501`, healthy IDLE/session-off at sequence/ack
+0, run 0, valid clock status `0x434DA501`, and required 200/100/325-MHz fabric
+and twelve managed-GTY reference clocks in range. MCU raw FPGA DONE `0x00`
+confirms both configured because the pins are active low. Full power,
+FPGA-diode, LGA80D, and FireFly temperature reads completed (190.254 W;
+F1/F2 diode 50.563/46.094 C). Readback evidence is
+`build/diagnostic_archive/all-links-v2-readonly-v103-after-F2-1793111080326955.log`.
+One subsequently authorized 180-second bidirectional inter-FPGA PRBS31 test
+with `cm_interface` v1.0.3 passed all 54 fitted receivers per endpoint with zero
+errors and zero native lock losses, about 4.64055e12 tested bits per lane.
+The user explicitly acknowledged that equipment connected to the outward
+FireFly TXs can safely receive PRBS31. Both endpoints stopped cleanly and final readback confirms
+healthy IDLE/session-off at sequence/ack 3, run 1, summary `0x00363601`, with
+required clocks valid. These sequences and run are consumed. The old run-5
+state below is historical. The immutable report is
+`build/diagnostic_archive/all-links-v2-timed-inter-fpga-180s-1793111744850372.report.md`.
+The released launchers still pin v1.0.0; this expressly authorized v1.0.3 run
+used a separately archived wrapper with exact library commit/tag and runtime
+hash verification. See `docs/all-links-v2-inter-fpga-hardware-gate.md`.
 
 **All-links v2 (`0x00020501`) now has a timing-clean, independently audited,
 compressed build candidate.** V1's reducers required acquisition/capture from
@@ -594,6 +638,41 @@ All bitstream targets default to compressed output. The golden `top.bit` sets
 Milestone 2 target sets the same property in its target-specific XDC, and
 Milestone 3 inherits the board constraint. Every bitstream build script rejects
 output if compression is not enabled.
+
+The golden build and synthesis-continuation flow also generate `top.bin`
+alongside `top.bit` in `build/vu13p_ibert_25g.runs/impl_1/`, using Vivado's
+`STEPS.WRITE_BITSTREAM.ARGS.BIN_FILE` option. The all-links v2 writers
+`scripts/write_all_links_v2_bit.tcl` and
+`scripts/write_all_links_v2_timing_hardened_control_boundary_fix_bit.tcl`
+use `write_bitstream -bin_file` to emit a `.bin` beside the same-named `.bit`
+from the audited checkpoint. BIN is the raw configuration image without the
+BIT file header; compression remains enabled. These changes apply to future
+output generation; archived artifacts and hardware release checks are unchanged.
+
+Existing images were converted to BIN on **2026-11-09** without rerunning
+synthesis, implementation or bitstream generation:
+
+| Image | BIN file | Bytes |
+| --- | --- | ---: |
+| Golden IBERT, compressed | [golden_ibert_compressed.bin](build/configuration_bins_20261109/golden_ibert_compressed.bin) | 70,389,172 |
+| Golden IBERT, historical uncompressed | [golden_ibert_historical.bin](build/configuration_bins_20261109/golden_ibert_historical.bin) | 113,318,376 |
+| Latest audited all-links v2, `0x00020501`, compressed | [all_links_v2_timing_hardened.bin](build/configuration_bins_20261109/all_links_v2_timing_hardened.bin) | 70,100,232 |
+
+Each BIN is the complete configuration payload of its existing BIT, with only
+the container header removed. Byte order, compression and embedded BRAM data
+are preserved; no padding or bit swapping was applied. Each output was checked
+byte for byte against its source payload, and source BIT hashes remain
+unchanged. [manifest.json](build/configuration_bins_20261109/manifest.json)
+records source paths, header offsets and source/output SHA-256 hashes;
+[SHA256SUMS](build/configuration_bins_20261109/SHA256SUMS) verifies the BINs:
+
+```sh
+(cd build/configuration_bins_20261109 && sha256sum -c SHA256SUMS)
+```
+
+These local generated files remain ignored by Git. No programming or hardware
+test accompanied conversion; the existing BIT-based deployment pins remain in
+effect.
 
 The generated IBERT `quad_pblock.tcl` files contain paths relative to each
 generated-core wrapper. `scripts/apply_ibert_floorplan.tcl` is installed as a

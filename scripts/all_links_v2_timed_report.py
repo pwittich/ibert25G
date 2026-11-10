@@ -38,9 +38,12 @@ def _escape(value):
 
 def _parse(lines):
     parsed = {"clocks": [], "power": [], "fpga": [], "lga": [],
-              "firefly": [], "records": [], "pass_markers": []}
+              "firefly": [], "records": [], "pass_markers": [], "predecessors": {}}
     for line in lines:
-        if line.startswith("CLOCK "):
+        if line.startswith("PREDECESSOR "):
+            fields = _fields(line)
+            parsed["predecessors"][fields["site"]] = fields
+        elif line.startswith("CLOCK "):
             parsed["clocks"].append(_fields(line))
         elif line.startswith("POWER12V "):
             parsed["power"].append(_fields(line))
@@ -140,6 +143,11 @@ def write_report(evidence, script, arguments, evidence_tag, exit_code,
     generated = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     command = "python3 -u %s %s" % (
         script, " ".join(shlex.quote(str(value)) for value in arguments))
+    starts = {}
+    for site in ("F1", "F2"):
+        observed = parsed["predecessors"].get(site, {})
+        starts[site] = (observed.get("sequence", _argument(arguments, "--%s-sequence" % site.lower())),
+                        observed.get("run", _argument(arguments, "--%s-run" % site.lower())))
 
     output = [
         "# All-links v2 timed-test report", "",
@@ -160,10 +168,8 @@ def write_report(evidence, script, arguments, evidence_tag, exit_code,
         "- ELF SHA-256: `%s`" % ELF_SHA256,
         "- `cm_interface` commit: `%s`" % cm_interface_commit,
         "- Command: `%s`" % command.replace("`", "\\`"),
-        "- Expected predecessor F1 sequence/run: %s/%s" %
-        (_argument(arguments, "--f1-sequence"), _argument(arguments, "--f1-run")),
-        "- Expected predecessor F2 sequence/run: %s/%s" %
-        (_argument(arguments, "--f2-sequence"), _argument(arguments, "--f2-run")),
+        "- Starting F1 sequence/run: %s/%s" % starts["F1"],
+        "- Starting F2 sequence/run: %s/%s" % starts["F2"],
         "", "## Clock preflight", "",
         "| Site | Result | Counters | clk_200 | clk_100 | clk_325 | 12 GT references (kHz) |",
         "|---|---:|---:|---:|---:|---:|---:|",

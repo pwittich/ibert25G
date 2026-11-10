@@ -43,6 +43,7 @@ foreach ip [get_ips] {
 
 generate_target all [get_ips]
 source [file join $script_dir configure_ibert_floorplan.tcl]
+set_property STEPS.WRITE_BITSTREAM.ARGS.BIN_FILE true [get_runs impl_1]
 
 puts "Created [get_property DIRECTORY [current_project]]"
 puts "Next: launch_runs synth_1; launch_runs impl_1 -to_step write_bitstream"
