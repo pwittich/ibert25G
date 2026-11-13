@@ -5,7 +5,12 @@ FPGA-to-FPGA GTY links on the Apollo Cornell rev3 dual-VU13P board. The same
 bitstream is intended for either FPGA site because the relevant pinout and
 clocking are identical at this level.
 
-## Current status — 2026-10-27
+## Current status — 2026-11-10
+
+Runtime per-quad TX/RX control is implemented and statically qualified in a
+separate, unreleased all-links v3 target (`0x00020502`) from baseline `34c73bb`. The working v2
+image and deployment pins remain intact. See the
+[v3 design, ABI and validation record](docs/all-links-v3-runtime-control.md).
 
 For operator steps, quad selection, deployment, logging, and recorded results,
 see [HOWTO.md](HOWTO.md). The guide starts with the three-minute inter-FPGA

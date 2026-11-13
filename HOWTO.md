@@ -1,5 +1,11 @@
 # HOWTO: run FPGA link BER tests
 
+Independent runtime TX/RX quad enables are implemented in the separate
+[all-links v3 target](docs/all-links-v3-runtime-control.md). V3 passes static qualification and is unreleased;
+the operating commands below continue to describe the working v2 image.
+The [v3 convenience launchers](docs/all-links-v3-runtime-control.md#convenience-launchers)
+cover enabling all inter-FPGA quads and four external loopback quads per FPGA.
+
 This guide uses the repository's all-links v2 tools on a Cornell rev3
 dual-VU13P blade. They perform timed, external-path PRBS31 tests at
 25.78125 Gb/s. The current image is a managed-GTY design, not the vendor IBERT

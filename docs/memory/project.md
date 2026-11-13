@@ -1,6 +1,23 @@
 # VU13P IBERT Project Memory
 
-Last updated: 2026-11-09
+Last updated: 2026-11-10
+
+## Runtime quad control implementation
+
+The user approved implementing all-links v3 (`0x00020502`) with independent
+28-bit TX/RX masks per FPGA, applied only while IDLE/session-off. Both masks
+default to zero. TX disable uses electrical idle; RX disable quiesces checking
+and lane protocol without powering down clocks/PLLs. Fully disabled quads are
+excluded from operational health barriers while raw diagnostics remain visible.
+
+Working baseline is committed as `34c73bb`; the feature branch is
+`feature/all-links-v3-quad-control`. New modules/ELF/project/scripts isolate
+the feature from v2 and historical targets. Build products remain ignored.
+No hardware/deployment action is authorized by the implementation phase.
+V3 passes static qualification with an independently audited compressed
+BIT/BIN. Its pinned launcher remains fail-closed/unreleased pending a
+separate reviewed hardware procedure. `docs/all-links-v3-runtime-control.md`
+and the top of `docs/memory/build-state.md` record development and build state.
 
 ## BIN output and existing-image conversion — 2026-11-09
 

@@ -1,6 +1,77 @@
 # VU13P IBERT Build State
 
-Last updated: 2026-11-09
+Last updated: 2026-11-10
+
+## V3 bench convenience scripts — 2026-11-10
+
+Added `enable_all_links_v3_inter_fpga.py`: configure TX/RX q221–q234 at
+both sites, FireFly masks zero; optional `--test` adds timed bidirectional
+external PRBS31 (54 fitted receivers per endpoint).
+Added `test_all_links_v3_firefly_loopback.py`: configure/test four external
+FireFly optical self-loop quads per site, default q121–q124, independently
+selectable with `--f1-quads/--f2-quads`. Requires FireFly acknowledgement;
+`--configure-only` skips PRBS/testing. Both replace full masks and default
+test duration to 90 seconds. Paired preflight precedes any mask write;
+partial application fails without retry/rollback or starting a test.
+
+The common v3 CLI keeps one software lock and one log/report across preset
+configuration and testing. All release, identity, predecessor, clock and
+cleanup guards remain. Runtime packager/manifest now includes seven files;
+new local bundle `build/all_links_v3_runtime_bundle_1794344913552735/` is
+hash-verified. 27 offline tests and Python 3.6 grammar checks pass. The
+previous qualification archive/runtime bundle remains frozen. No RTL/image,
+release-flag, deployment, programming or hardware change accompanied this work.
+Usage: `docs/all-links-v3-runtime-control.md#convenience-launchers`.
+
+## All-links v3 static qualification PASS — 2026-11-10
+
+User-approved runtime control is implemented on
+`feature/all-links-v3-quad-control`, based on preserved commit `34c73bb`.
+Independent 28-bit TX/RX masks per FPGA default to zero and change only
+between tests, after controller cleanup, confirmed session stop and snapshot
+completion. TX disable asserts electrical idle; RX disable quiesces checking.
+Fully disabled quads are isolated from operational health; raw faults remain.
+Historical source, v2 deployment pins and four archived v2 hashes are intact.
+
+V3 `0x00020502` has separate RTL, firmware/project/topology derivation,
+constraints, independent audit and fail-closed bench tools. Configuration
+command 4, F7 status and raw quad pages 80–9B preserve the existing ABI.
+Low/high/low rearm, tagged TX session barriers, SLR-local ACK banks and 160
+real management return registers cover stopped clocks and cancellation.
+
+Fresh synthesis/preflight, normal implementation and independent routed audit
+PASS. Setup/hold **+0.036/+0.009 ns**, zero failing endpoints;
+**227,324/227,324** nets routed, zero routing/Error-DRC failures;
+**532/532** skew groups. Exact 112/28/12 GT inventory and 6/8/8/6 physical
+control/reset residency pass. One RTSTAT-10 warning covers eight optimized
+nets without loads. Compressed BIT/BIN emission passes; BIN exactly matches
+the complete 69,360,720-byte compressed BIT payload.
+
+Frozen evidence and artifacts:
+`build/diagnostic_archive/all-links-v3-runtime-quad-control-static-pass/`.
+Its manifest and relative SHA256SUMS cover artifacts, source snapshot,
+reports/logs and pinned runtime bundle. Artifact hashes:
+
+- BIT: `60c8311daabf487184672bf987773fbb6fd808bb7e070fde4588854e40d40ed1`
+- BIN: `b04bff257ecdd9d3aeb6d1a63a94a1fa0e4bc7cdcb856b7bac66b5e9d54fcf10`
+- Routed DCP: `ca56c79ccc90b5cf67e6d85d982238b2c3d03997b79fe45d7eccd100354fb684`
+- Synth DCP: `4cdc33364e0e53819f53a9557a4ba333b8158e7b00dd5ac6d53d58d29c1322df`
+- ELF: `c8b1e6c53d9649c0fda090384944d1b9165607c58fe95d1c66065a1db9753911`
+
+Four focused simulations, 21 offline v3 tests, seven historical simulation
+runners and 15 unchanged v2 operator tests pass. The vendor XPM repeated-
+instance assertion reproduction and independent 448-chunk monitors are
+recorded in `docs/all-links-v3-runtime-control.md`. The unchanged direct
+firmware test's v10/v12 version expectation mismatch is also documented.
+Superseded failed synthesis/routes and one-off rebuild helpers remain in
+ignored diagnostic archives; no historical build attempt was repeated.
+
+Final local runtime bundle:
+`build/all_links_v3_runtime_bundle_1794341646157111/`.
+It contains five runtime files plus their manifest and artifact pins;
+`RELEASED=False` still blocks writes. No programming, deployment, reset,
+MCU access or hardware test occurred. Last observed hardware remains the
+October 27 v2 state below, without fresh readback during this work.
 
 ## Build output update — 2026-11-09
 
