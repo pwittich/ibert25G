@@ -1,6 +1,181 @@
 # VU13P IBERT Build State
 
-Last updated: 2026-11-10
+Last updated: 2026-11-14
+
+## Resume and operator documentation — 2026-11-14
+
+Eye-scan v1 static implementation is complete; hardware release remains
+closed (`RELEASED=False`). No build or hardware worker remains running.
+No new board observation or hardware action accompanied this memory update;
+the last observed board state is the October 27 all-links v2 state documented
+in [project memory](project.md).
+
+Added [the eye-scan how-to](../eye-scan-howto.md), linked from README, HOWTO
+and [the runtime reference](../eye-scan-v1-runtime.md). It covers offline
+plotting, runtime packaging, future acquisition after hardware release,
+JSON/CSV/log/report outputs, retained-job acknowledgement and failure cleanup.
+Documented CLI flags and local links were checked; whitespace checks pass.
+These documentation changes postdate the frozen candidate source overlay;
+the archive remains unchanged.
+
+The candidate archive's `ARCHIVE_SHA256SUMS` independently verifies all 1699
+files. Final read-only corrected preflight passes on the exact frozen
+synthesis DCP without writing a checkpoint; log
+`build/logs/check_eye_final_synth-20261113T204913Z.log`.
+The first standalone invocation stopped at its project-file guard; the
+existing checkpoint-only mode resolved that invocation error.
+
+Baseline commit is `a82d50b`; eye implementation and subsequent documentation
+remain uncommitted. The dated development entries below retain historical
+intermediate states; the static qualification closeout supersedes their
+earlier lists of missing integration work. Next hardware work requires a
+separate reviewed gate; no additional implementation build is pending.
+
+## Eye-scan v1 statically qualified; hardware unreleased — 2026-11-13
+
+Separate target `0x00020503` includes integrated RTL, command/page firmware,
+28 local DRP owners, a 4096-point matrix, guarded operator tools and offline
+PNG/PDF plots. V2/v3 source and deployment pins remain unchanged. No MCU,
+programming, reset, deployment or hardware scan has occurred; release is closed.
+
+The initial full route failed setup at **-0.264/-58.683 ns over 646 clk_200
+endpoints**. Hold passed +0.010 ns, 277907/277907 routable nets are complete,
+and routing errors/Error DRCs are zero. No audit or bitstream followed.
+Its exact 1525 source/implementation inputs were independently hash-verified
+and copied before editing. Project, reports, timing triage, logs and input
+copies are frozen under
+`build/diagnostic_archive/eye-scan-v1-initial-route-timing-failure/`.
+Routed/synth DCP SHA-256:
+`68da98b17db1e42ae5e1d09ee6e1c2c4a8ab496a48ed8f26654c480e067ac878` /
+`79e87d390a8cd4b7b954d34c3841b95eb14ebc707422d44ff78b29492715b6b8`.
+
+Path-guided eye-only changes queue DRP commands before GT launch, register
+normal PRBS replies by one cycle while preserving request passthrough, clear
+the sampling timer while idle, register selected read pages, register the
+local result-copy active/fault bits, and transport matched bank status,
+reason and diagnostic payload through two real return stages. The latter
+adds two clocks to ready/fault/idle/acquire/capture publication while keeping
+the existing tagged TX-session/configuration handshake latency exact.
+No clock, ABI, GT profile, FSM encoding or timing exception was changed.
+
+Updated simulations pass: point 49 cases, arbiter 17 scenarios/14 operations
+(including queued stale-RDY and queued timeout), real q121 integration,
+all-28 bank dispatch, engine and delayed-ACK regressions, and a 160-cycle
+comparison against the preserved v3 reducer proving matched status/diagnostic
+latency and identical session/configuration timing. Logs are under `build/logs/`
+with stamps `190343Z`, `190528Z`, `190529Z`, `190418Z`, and `190633Z`.
+All 21 offline operator/plot tests pass on `/usr/bin/python3`; v3/v2 tests
+27/15 and all seven unchanged historical simulation runners previously pass.
+
+A fresh project was created from preserved v3. **Normal routed signoff
+passes +0.001/+0.009 ns**, zero failing endpoints, all 281988 routable nets
+complete, zero routing/Error DRC failures, all 532 skew groups met. Parent
+session `89378` exited PASS; entry point
+`scripts/build_eye_scan_v1_routed.tcl`; log
+`build/logs/build_eye_scan_v1_routed-20261113T190835Z.log`.
+Do not start another build in this project. Initial session `96584` exited
+at the preserved timing failure. Matching ELF remains
+`c9b85dbce9299d50974b660e40778806a4d86d4354a181035a9848e5d42445e7`.
+Fresh synthesis/preflight passes, including 1896 status-return registers
+and 28 queued launch bits. The added hierarchy-port fanin query encountered
+optimized-away aliases, so that query alone is not proof. A separate check
+against real primitive D/R/CE pins passes: 17248 point registers, 51744
+inputs, 17768 startpoints, zero direct GT outputs. Log
+`build/logs/check_eye_registered_synth-20261113T192316Z.log`; synth DCP SHA
+`7f3ca87b62ec7f49d9591b837f9a75a09f805afa25c3206972e389dbb2b834c5`.
+The routed audit uses this stronger helper. After audited BIT/BIN and verbatim
+input/artifact freezing, the obsolete preflight alias query was replaced by
+that same primitive helper, future build manifests include that helper, and
+copied build labels were corrected. Original
+build inputs remain in the archive; working-tree implementation checksums
+intentionally differ for these validation/message-only changes. No RTL,
+constraints or artifacts changed. Archive-mode audit verifies copied inputs
+and artifacts independently. Both variants of the added
+same-instance all112-to-sparse regression pass; log stamp `191736Z`.
+First audit stopped on reset fanout ownership; its reports/verifier are
+preserved under `build/eye_scan_v1_audit_attempt1_reset_ownership_failure/`.
+Focused proof finds exactly one diagnostic-R and one second-stage-D alias,
+with equivalent bank release waveforms, preserved target SLR/local quad
+fanout, and passing ordinary setup/hold. Candidate DCP is unchanged.
+See `docs/eye-scan-v1-runtime.md` for exact proof and evidence.
+Full independent audit passes; log
+`build/logs/audit_eye_scan_v1_routed-20261113T201846Z.log`.
+Compressed BIT/BIN emission and exact payload/header verification pass.
+Candidate pins are populated; `RELEASED=False` remains enforced. Exact
+artifacts, 1526 copied inputs, reports, runtime bundle and source overlay are
+frozen under `build/diagnostic_archive/eye-scan-v1-0x00020503-static-candidate/`.
+BIT SHA `e170ead04e42c662e4a711c156a048e22da3c7c280e6820a6e644daec5b2850f`;
+routed DCP SHA `af25ba8aa3f5d04437af04f854631b2605b005355bd5f5399f4e7f5157e40873`.
+A host-only Gray-sequence/single-byte publication fix prevents torn request
+words during thousands of page fetches; five 4200-command tests cover byte
+carry boundaries. No hardware action has occurred. See the runtime document
+for artifact hashes, narrow timing margin and reset ownership proof.
+
+## Eye-scan point sequencer and topology — 2026-11-13
+
+Added `eye_scan_point`: 23-word snapshot, initialized/idle preflight,
+readback-verified configuration, bounded LPM/DFE raw sampling, latched cancel,
+stop/WAIT and verified restoration before release. Supports the inspected
+80-bit/internal-width-2/RXOUT_DIV=1 profile; other profiles are rejected by
+caller-supplied verified eligibility. Raw DFE pairs retain separate counts
+and denominators, including prescale 31. Unread results block overwrite.
+Fatal transport/restoration failures retain ownership or port quarantine.
+The arbiter now holds a timed-out command bundle stable for late completion.
+
+Point+arbiter simulation passes **49 cases**, including all 23 configuration
+write cancellation boundaries. The original arbiter regression passes 15
+scenarios. Final point OOC synthesis passes (950 LUT/649 FF/zero DSP/BRAM,
+no latches, five encoded state bits); updated arbiter synthesis also passes.
+OOC timing is diagnostic, not image sign-off. Final logs:
+`run_eye_scan_point_sim-20261113T173511Z.log`,
+`synth_eye_scan_point-20261113T173512Z.log`,
+`run_eye_scan_drp_sim-20261113T173011Z.log`,
+`synth_eye_scan_drp-20261113T173513Z.log` under `build/logs/`.
+
+Generated 28 independent `_eye_v1_topology` wrappers exposing EYESCANRESET;
+inverse byte comparisons and syntax checks pass. Output is ignored
+`build/eye_scan_v1_topology_wrappers/`; vendor originals are unchanged.
+Added a new-top-only initialization hook for ES_EYE_SCAN_EN and centered
+unified phase, with compression enforcement. Both properties set/read back
+and restore in memory on the exact v3 synthesis DCP; the hook rejects that
+historical top and the baseline DCP hash remains unchanged. Log:
+`build/logs/inspect_eye_scan_baseline-20261113T173456Z.log`.
+Existing v3 IP health inspection passes with no locked cores; reports are
+under `build/eye_scan_v3_ip_health_20261113T1737Z/`.
+
+There is no integrated eye image/ELF, release, deployment or hardware action.
+Remaining: separate top/SLR/quad integration, global BER/config exclusion,
+grid/session budgets, firmware/result ABI, host tooling and full build/audit.
+See `docs/eye-scan-plan.md` for interfaces, status bits and exact evidence.
+
+## Separate eye-scan image started — 2026-11-13
+
+Committed the complete pre-eye v3 state as `a82d50b` (`Add statically
+qualified all-links v3 runtime quad control`); all 27 offline v3 tests pass.
+The recovered plan and implementation boundary are in `docs/eye-scan-plan.md`.
+Added isolated `eye_scan_drp_arbiter` and its XSim runner/testbench. Initial
+simulation passes 15 scenarios / 13 scan operations: normal-client draining,
+exclusive per-lane commands, response backpressure, restoration ownership,
+conflicts, deadline-edge reply, timeout quarantine and late replies.
+Log: `build/logs/run_eye_scan_drp_sim-20261113T154852Z.log`.
+
+Added a hash-pinned read-only v3 synthesis-checkpoint inspection script for
+all 112 receiver/eye profiles and in-memory eye-enable property readback.
+Checkpoint inspection passes on all 112 channels: 80-bit port, internal-width
+encoding 2, constant LPM mode, eye circuitry disabled. Vivado accepts and reads
+back the temporary eye-enable property, which is restored before closing the
+design; input DCP hash is unchanged. Report:
+`build/eye_scan_baseline_1794584950748058/channels.tsv`; log:
+`build/logs/inspect_eye_scan_baseline-20261113T154858Z.log`.
+Standalone arbiter synthesis passes: no latches, two original state bits,
+68 FDREs, zero errors/critical warnings. Log:
+`build/logs/synth_eye_scan_drp-20261113T155141Z.log`; reports:
+`build/eye_scan_drp_synth_1794585104891920/`. OOC timing is not image sign-off;
+small-design parallelism and missing OOC clock-location warnings are retained.
+There is no new eye image, ELF, ABI, artifact pin, release or hardware action.
+Existing v2/v3 source behavior and
+qualified artifacts remain preserved. Next: separate topology/initialization,
+point sequencer/restoration, global integration and firmware/host interface.
 
 ## V3 bench convenience scripts — 2026-11-10
 

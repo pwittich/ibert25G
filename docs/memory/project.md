@@ -1,6 +1,46 @@
 # VU13P IBERT Project Memory
 
-Last updated: 2026-11-10
+Last updated: 2026-11-14
+
+## Current eye-scan resume state — 2026-11-14
+
+Eye-scan v1 (`0x00020503`) is implemented and statically qualified as a
+separate target. RTL, firmware, operator CLI, saved JSON/CSV and offline
+PNG/PDF plotting are complete. Focused and historical simulations, 21 offline
+operator tests, synthesis/preflight, independent routed audit and compressed
+BIT/BIN verification pass. Setup/hold slack is **+0.001/+0.009 ns**, with
+zero failing endpoints, 281988 fully routed nets and 532/532 skew groups met.
+The 1-ps setup margin is narrow; this is static qualification, not hardware
+qualification.
+
+Exact evidence is frozen under
+`build/diagnostic_archive/eye-scan-v1-0x00020503-static-candidate/`.
+Its `ARCHIVE_SHA256SUMS` was independently verified for all 1699 files.
+The archive retains the original build inputs, artifacts, reports, runtime
+bundle and source overlay; preserve it unchanged. Build-state memory and
+the runtime reference contain the artifact hashes and validation-only
+preflight/audit changes made after the original build.
+
+**Hardware remains unreleased and untested.** The contract keeps
+`RELEASED=False`; no eye-scan programming, deployment, MCU access, reset or
+physical scan occurred. No build or hardware worker remains running.
+Next hardware work requires a separately reviewed procedure; do not bypass
+the release guard or replay consumed historical gates. The last observed
+board state remains the October 27 all-links v2 state recorded below.
+The eye runtime pins clean `cm_interface` v1.0.3 at
+`64260cf23b01c9da987feda1fbf51567240c2c71`.
+
+Start with [the operator how-to](../eye-scan-howto.md), linked from README,
+HOWTO and [the runtime reference](../eye-scan-v1-runtime.md).
+It covers plotting now, packaging, acquisition after release, saved results,
+explicit retained-job acknowledgement and failure cleanup. The recovered
+plan is [eye-scan-plan.md](../eye-scan-plan.md). These final how-to additions
+postdate the frozen candidate overlay.
+
+Pre-eye work was committed as `a82d50b` (`Add statically qualified all-links
+v3 runtime quad control`). Eye implementation and documentation remain
+uncommitted. Keep generated `build/` products out of commits. The v3 section
+below describes the preceding milestone, not the latest commit.
 
 ## Runtime quad control implementation
 

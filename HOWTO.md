@@ -1,5 +1,9 @@
 # HOWTO: run FPGA link BER tests
 
+For eye-sampler scans and PNG/PDF plots, use the separate
+[eye-scan how-to](docs/eye-scan-howto.md). Eye-scan v1 is statically qualified
+and remains unreleased for hardware; the BER commands below use v2.
+
 Independent runtime TX/RX quad enables are implemented in the separate
 [all-links v3 target](docs/all-links-v3-runtime-control.md). V3 passes static qualification and is unreleased;
 the operating commands below continue to describe the working v2 image.

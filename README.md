@@ -5,7 +5,18 @@ FPGA-to-FPGA GTY links on the Apollo Cornell rev3 dual-VU13P board. The same
 bitstream is intended for either FPGA site because the relevant pinout and
 clocking are identical at this level.
 
-## Current status — 2026-11-10
+## Current status — 2026-11-13
+
+The [separate eye-scan image](docs/eye-scan-plan.md) is implemented.
+The [integrated eye-scan v1 target](docs/eye-scan-v1-runtime.md) now passes
+focused integration tests, fresh synthesis/preflight and normal routed
+setup/hold signoff at +0.001/+0.009 ns. The first failed route is preserved.
+Independent routed audit passes and verified compressed BIT/BIN artifacts are
+frozen. Operator tools include JSON/CSV/PNG/PDF output and remain unreleased
+pending a separate reviewed hardware gate. No eye-scan image is running on hardware.
+
+See the [eye-scan how-to](docs/eye-scan-howto.md) for offline plotting,
+runtime preparation, acquisition commands after release, and result cleanup.
 
 Runtime per-quad TX/RX control is implemented and statically qualified in a
 separate, unreleased all-links v3 target (`0x00020502`) from baseline `34c73bb`. The working v2
